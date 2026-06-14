@@ -1,5 +1,5 @@
 import { desc, eq } from "drizzle-orm";
-import { createD1ObjectSession, DrizzleD1Object, drizzle } from "drizzle-orm/d1-object";
+import { createD1ObjectSession, d1PrimaryMethods, DrizzleD1Object, drizzle } from "drizzle-orm/d1-object";
 
 import migrations from "../drizzle/migrations.js";
 import { type CreatePostInput, type Post, posts } from "./schema";
@@ -20,6 +20,8 @@ type ErrorBody = {
 };
 
 export class BlogDatabase extends DrizzleD1Object<Env> {
+	static override readonly primaryMethods = d1PrimaryMethods<BlogDatabase>()("createPost");
+
 	db = drizzle(this.ctx, { schema });
 
 	listPosts(options: ListPostsOptions = {}): Post[] {
@@ -40,8 +42,6 @@ export class BlogDatabase extends DrizzleD1Object<Env> {
 	}
 
 	createPost(input: CreatePostInput): Post {
-		this.assertPrimary("createPost");
-
 		const post = this.db
 			.insert(posts)
 			.values(input)
@@ -56,7 +56,6 @@ export class BlogDatabase extends DrizzleD1Object<Env> {
 	}
 
 	applyMigrations() {
-		this.assertPrimary("applyMigrations");
 		return this.applyDrizzleMigrations(migrations);
 	}
 }
@@ -112,7 +111,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
 			return input;
 		}
 
-		const session = createSession(request, env, { routingMode: "primary-only" });
+		const session = createSession(request, env);
 		const post = await session.client.createPost(input);
 		return jsonWithBookmark({ post }, session.getBookmark(), 201);
 	}
@@ -124,13 +123,10 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
 	return jsonError("Not found", 404);
 }
 
-function createSession(
-	request: Request,
-	env: Env,
-	options?: DurableObjectNamespaceGetDurableObjectOptions,
-) {
+function createSession(request: Request, env: Env) {
 	const objectName = objectNameForRequest(request);
-	const stub = env.BLOG_DATABASE.getByName(objectName, options);
+	const id = env.BLOG_DATABASE.idFromName(objectName);
+	const stub = env.BLOG_DATABASE.get(id);
 	return createD1ObjectSession<BlogDatabase>(stub, {
 		bookmark: request.headers.get(BOOKMARK_HEADER),
 	});

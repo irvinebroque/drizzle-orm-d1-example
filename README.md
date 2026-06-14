@@ -5,7 +5,7 @@ This example uses the new D1 application-object model from the preview work in:
 - [irvinebroque/drizzle-orm#1](https://github.com/irvinebroque/drizzle-orm/pull/1)
 - [irvinebroque/cloudflare-docs-d1-vnext#3](https://github.com/irvinebroque/cloudflare-docs-d1-vnext/pull/3)
 
-The front Worker does not bind to a D1 database or call `env.DB.prepare()`. It routes each request to a SQLite-backed Durable Object. The `BlogDatabase` object owns the database, creates the Drizzle client with `drizzle(this.ctx, { schema })`, and uses `DrizzleD1Object` for D1 runtime setup.
+The front Worker does not bind to a D1 database or call `env.DB.prepare()`. It routes each request to a SQLite-backed Durable Object. The `BlogDatabase` object owns the database, creates the Drizzle client with `drizzle(this.ctx, { schema })`, uses `DrizzleD1Object` for D1 runtime setup, and marks write methods with `d1PrimaryMethods()` so session calls forward to the primary before application code runs.
 
 ## Status
 
@@ -71,12 +71,11 @@ Generate migrations after editing `src/schema.ts`:
 pnpm run generate
 ```
 
-Apply bundled migrations through a primary-only object method:
+Apply bundled migrations through an object method. `applyDrizzleMigrations()` forwards to the primary if the method is called on a replica:
 
 ```ts
-const db = env.BLOG_DATABASE.getByName("site:example.com", {
-	routingMode: "primary-only",
-});
+const id = env.BLOG_DATABASE.idFromName("site:example.com");
+const db = env.BLOG_DATABASE.get(id);
 
 await db.applyMigrations();
 ```
@@ -86,7 +85,7 @@ Keep this behind a deploy script or authenticated admin workflow. SQL migrations
 ## Best-practice notes
 
 - Reads use default Durable Object routing so D1 can serve them from replicas when available.
-- Writes use `routingMode: "primary-only"` and the object also asserts primary execution.
-- `createD1ObjectSession()` keeps bookmark propagation at the Worker boundary, so application methods stay focused on domain data.
+- Writes are marked with `d1PrimaryMethods()` so replica session calls forward to the primary before running application code.
+- `createD1ObjectSession()` sends the current bookmark with each method call, waits for it inside the object, serializes calls through one session, and stores the updated bookmark returned by the object.
 - `wrangler.jsonc` uses a current compatibility date, `nodejs_compat`, generated Worker types, and observability.
 - The example uses per-host object names (`site:<hostname>`). In a real app, choose a boundary that spreads write load naturally, such as tenant, organization, site, or user.
