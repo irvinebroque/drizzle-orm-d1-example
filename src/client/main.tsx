@@ -14,7 +14,6 @@ import {
 	CheckCircle,
 	Clock,
 	Database,
-	GitBranch,
 	Info,
 	Lightning,
 	Play,
@@ -814,7 +813,6 @@ function App() {
 								{ label: "Results", value: "results" },
 								{ label: "Code", value: "code" },
 								{ label: "Trace", value: "trace" },
-								{ label: "Model", value: "model" },
 							]}
 							value={activeTab}
 							variant="segmented"
@@ -830,14 +828,6 @@ function App() {
 					)}
 					{activeTab === "code" && <CodeExamples />}
 					{activeTab === "trace" && <TraceView runs={runs} />}
-					{activeTab === "model" && (
-						<ExecutionModel
-							appMethod={appMethod}
-							pipelined={pipelined}
-							queries={benchmarkInfo.scenario?.queries ?? DEFAULT_QUERIES}
-							sequential={baseline}
-						/>
-					)}
 				</section>
 			</div>
 		</TooltipProvider>
@@ -1175,89 +1165,6 @@ function TraceView({ runs }: { runs: Record<BenchmarkMode, ModeRun> }) {
 						))}
 					</Table.Body>
 				</Table>
-			</div>
-		</div>
-	);
-}
-
-function ExecutionModel({
-	appMethod,
-	pipelined,
-	queries,
-	sequential,
-}: {
-	appMethod: ModeStats | null;
-	pipelined: ModeStats | null;
-	queries: string[];
-	sequential: ModeStats | null;
-}) {
-	return (
-		<div className="model-grid">
-			<ModelLane
-				description="Ten request/response turns through the current D1 binding."
-				icon={<Database />}
-				label="D1 sequential"
-				mode="serial"
-				queries={queries}
-				stat={sequential}
-			/>
-			<ModelLane
-				description="One RPC enters the Durable Object, then the 10 sequential reads run beside SQLite."
-				icon={<BracketsCurly />}
-				label="DO app method"
-				mode="collapsed"
-				queries={queries}
-				stat={appMethod}
-			/>
-			<ModelLane
-				description="Ten Drizzle calls are issued together through the Durable Object session."
-				icon={<GitBranch />}
-				label="DO pipelined"
-				mode="parallel"
-				queries={queries}
-				stat={pipelined}
-			/>
-		</div>
-	);
-}
-
-function ModelLane({
-	description,
-	icon,
-	label,
-	mode,
-	queries,
-	stat,
-}: {
-	description: string;
-	icon: React.ReactNode;
-	label: string;
-	mode: "collapsed" | "parallel" | "serial";
-	queries: string[];
-	stat: ModeStats | null;
-}) {
-	return (
-		<div className="model-lane">
-			<div className="model-lane-head">
-				<span>{icon}</span>
-				<div>
-					<strong>{label}</strong>
-					<small>{stat ? formatMs(stat.p50) : "run to measure p50"}</small>
-				</div>
-			</div>
-			<p>{description}</p>
-			<div className={`query-timeline ${mode}`}>
-				{queries.map((query, index) => (
-					<span
-						key={query}
-						style={{
-							"--query-index": index,
-							"--query-total": queries.length,
-						} as React.CSSProperties}
-					>
-						{query}
-					</span>
-				))}
 			</div>
 		</div>
 	);
