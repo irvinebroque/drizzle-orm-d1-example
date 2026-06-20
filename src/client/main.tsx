@@ -100,6 +100,7 @@ type ModeDefinition = {
 	badge: "blue" | "green" | "neutral" | "orange" | "purple" | "teal";
 	description: React.ReactNode;
 	group: "Current D1" | "Durable Object SQLite";
+	implementation: "app-method" | "drizzle" | "raw-batch";
 	label: string;
 	shortLabel: string;
 };
@@ -116,6 +117,7 @@ const MODE_DEFINITIONS: Record<BenchmarkMode, ModeDefinition> = {
 		badge: "orange",
 		description: "Current D1 binding with six awaited Drizzle queries.",
 		group: "Current D1",
+		implementation: "drizzle",
 		label: "D1 + Drizzle sequential",
 		shortLabel: "D1 sequential",
 	},
@@ -124,6 +126,7 @@ const MODE_DEFINITIONS: Record<BenchmarkMode, ModeDefinition> = {
 		badge: "blue",
 		description: "Current D1 binding with the six Drizzle promises started together.",
 		group: "Current D1",
+		implementation: "drizzle",
 		label: "D1 + Drizzle parallel",
 		shortLabel: "D1 parallel",
 	},
@@ -141,10 +144,11 @@ const MODE_DEFINITIONS: Record<BenchmarkMode, ModeDefinition> = {
 				>
 					env.DB.batch()
 				</a>{" "}
-				as an old-model control.
+				as an old-model control. This mode does not use Drizzle.
 			</>
 		),
 		group: "Current D1",
+		implementation: "raw-batch",
 		label: "D1 raw batch",
 		shortLabel: "D1 batch",
 	},
@@ -153,6 +157,7 @@ const MODE_DEFINITIONS: Record<BenchmarkMode, ModeDefinition> = {
 		badge: "purple",
 		description: "New remote Drizzle client, still awaiting each Durable Object call.",
 		group: "Durable Object SQLite",
+		implementation: "drizzle",
 		label: "DO SQLite + Drizzle sequential",
 		shortLabel: "DO sequential",
 	},
@@ -161,6 +166,7 @@ const MODE_DEFINITIONS: Record<BenchmarkMode, ModeDefinition> = {
 		badge: "teal",
 		description: "New adapter with the same six Drizzle calls issued before awaiting.",
 		group: "Durable Object SQLite",
+		implementation: "drizzle",
 		label: "DO SQLite + Drizzle pipelined",
 		shortLabel: "DO pipelined",
 	},
@@ -169,6 +175,7 @@ const MODE_DEFINITIONS: Record<BenchmarkMode, ModeDefinition> = {
 		badge: "neutral",
 		description: "One Durable Object RPC method runs all six reads next to SQLite.",
 		group: "Durable Object SQLite",
+		implementation: "app-method",
 		label: "DO app method",
 		shortLabel: "DO method",
 	},
@@ -721,7 +728,7 @@ function ResultsTable({
 				<Table.Header variant="compact">
 					<Table.Row>
 						<Table.Head>Mode</Table.Head>
-						<Table.Head>Transport</Table.Head>
+						<Table.Head>Transport / API</Table.Head>
 						<Table.Head>p50 Worker</Table.Head>
 						<Table.Head>p95 Worker</Table.Head>
 						<Table.Head>HTTP p50</Table.Head>
@@ -742,7 +749,7 @@ function ResultsTable({
 									</div>
 								</Table.Cell>
 								<Table.Cell>
-									<Badge variant={definition.badge}>{definition.group}</Badge>
+									<TransportBadges definition={definition} />
 								</Table.Cell>
 								<Table.Cell>{stat ? formatMs(stat.p50) : statusLabel(runs[mode].state)}</Table.Cell>
 								<Table.Cell>{stat ? formatMs(stat.p95) : "-"}</Table.Cell>
@@ -754,6 +761,35 @@ function ResultsTable({
 					})}
 				</Table.Body>
 			</Table>
+		</div>
+	);
+}
+
+function TransportBadges({ definition }: { definition: ModeDefinition }) {
+	return (
+		<div className="transport-badges">
+			<span className={`transport-pill ${definition.group === "Current D1" ? "current" : "object"}`}>
+				{definition.group}
+			</span>
+			{definition.implementation === "drizzle" && (
+				<span className="transport-pill drizzle">Drizzle</span>
+			)}
+			{definition.implementation === "raw-batch" && (
+				<>
+					<a
+						className="transport-pill raw"
+						href="https://developers.cloudflare.com/d1/worker-api/d1-database/#batch"
+						rel="noreferrer"
+						target="_blank"
+					>
+						Raw batch API
+					</a>
+					<span className="transport-pill no-drizzle">No Drizzle</span>
+				</>
+			)}
+			{definition.implementation === "app-method" && (
+				<span className="transport-pill method">App method</span>
+			)}
 		</div>
 	);
 }
