@@ -1336,7 +1336,12 @@ function formatSpeedup(baseline: ModeStats | null, compared: ModeStats | null): 
 	if (!Number.isFinite(speedup) || speedup <= 0) {
 		return "-";
 	}
-	return `${speedup.toFixed(2)}x`;
+	return formatMultiplier(speedup);
+}
+
+function formatMultiplier(value: number): string {
+	const rounded = value >= 10 ? value.toFixed(1) : value.toFixed(2);
+	return `${rounded.replace(/\.?0+$/, "")}x`;
 }
 
 function comparisonBaselineForMode(mode: BenchmarkMode): BenchmarkMode | undefined {
@@ -1356,11 +1361,27 @@ function comparisonLabel(mode: BenchmarkMode, stats: Record<BenchmarkMode, ModeS
 	if (baselineMode === mode) {
 		return "baseline";
 	}
-	const speedup = formatSpeedup(stats[baselineMode], stats[mode]);
-	if (speedup === "-") {
-		return `vs ${MODE_DEFINITIONS[baselineMode].shortLabel}`;
+	const baseline = stats[baselineMode];
+	const compared = stats[mode];
+	const target = comparisonTargetLabel(baselineMode);
+	if (!baseline || !compared) {
+		return `vs ${target}`;
 	}
-	return `${speedup} vs ${MODE_DEFINITIONS[baselineMode].shortLabel}`;
+	const speedup = baseline.p50 / compared.p50;
+	if (!Number.isFinite(speedup) || speedup <= 0) {
+		return `vs ${target}`;
+	}
+	if (speedup === 1) {
+		return `same as ${target}`;
+	}
+	if (speedup > 1) {
+		return `${formatMultiplier(speedup)} faster than ${target}`;
+	}
+	return `${formatMultiplier(1 / speedup)} slower than ${target}`;
+}
+
+function comparisonTargetLabel(mode: BenchmarkMode): string {
+	return MODE_DEFINITIONS[mode].group === "Current D1" ? "D1" : MODE_DEFINITIONS[mode].shortLabel;
 }
 
 function mean(values: number[]): number {
