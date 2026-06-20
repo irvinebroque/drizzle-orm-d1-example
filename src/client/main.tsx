@@ -833,7 +833,6 @@ function PerformanceBars({
 			<div className="empty-state">
 				<ChartBar aria-hidden />
 				<h3>No samples yet</h3>
-				<p>Run the benchmark to turn the API responses into live latency bars.</p>
 			</div>
 		);
 	}

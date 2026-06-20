@@ -72,8 +72,7 @@ h3 {
 }
 
 .title-block p,
-.section-heading p,
-.empty-state p {
+.section-heading p {
 	color: #475569;
 	font-size: 0.95rem;
 	line-height: 1.5;
