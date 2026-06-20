@@ -444,6 +444,32 @@ h3 {
 	gap: 12px;
 }
 
+.results-table-stack {
+	display: flex;
+	flex-direction: column;
+	gap: 18px;
+}
+
+.results-table-group {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.results-table-heading h3 {
+	color: #0f172a;
+	font-size: 0.92rem;
+	font-weight: 760;
+	line-height: 1.2;
+}
+
+.results-table-heading p {
+	color: #64748b;
+	font-size: 0.8rem;
+	line-height: 1.45;
+	margin-top: 3px;
+}
+
 .table-frame {
 	border: 1px solid rgba(148, 163, 184, 0.34);
 	border-radius: 8px;

@@ -1000,8 +1000,47 @@ function ResultsTable({
 	runs: Record<BenchmarkMode, ModeRun>;
 	stats: Record<BenchmarkMode, ModeStats | null>;
 }) {
+	const selected = new Set(modes);
+	const groups = COMPARISON_GROUPS
+		.map((group) => ({
+			...group,
+			modes: group.modes.filter((mode) => selected.has(mode)),
+		}))
+		.filter((group) => group.modes.length > 0);
+
 	return (
-		<div className="table-frame">
+		<div className="results-table-stack">
+			{groups.map((group) => (
+				<section className="results-table-group" key={group.title}>
+					<div className="results-table-heading">
+						<h3>{group.title}</h3>
+						<p>{group.description}</p>
+					</div>
+					<ResultsTableFrame
+						ariaLabel={`${group.title} benchmark results`}
+						modes={group.modes}
+						runs={runs}
+						stats={stats}
+					/>
+				</section>
+			))}
+		</div>
+	);
+}
+
+function ResultsTableFrame({
+	ariaLabel,
+	modes,
+	runs,
+	stats,
+}: {
+	ariaLabel: string;
+	modes: BenchmarkMode[];
+	runs: Record<BenchmarkMode, ModeRun>;
+	stats: Record<BenchmarkMode, ModeStats | null>;
+}) {
+	return (
+		<div className="table-frame" aria-label={ariaLabel}>
 			<Table layout="fixed">
 				<Table.Header variant="compact">
 					<Table.Row>
