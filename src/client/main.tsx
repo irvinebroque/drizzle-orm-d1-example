@@ -1205,7 +1205,7 @@ function ExecutionModel({
 				stat={pipelined}
 			/>
 			<ModelLane
-				description="One RPC enters the Durable Object and the route fan-out runs beside SQLite."
+				description="One RPC enters the Durable Object and the page data fan-out runs beside SQLite."
 				icon={<BracketsCurly />}
 				label="DO app method"
 				mode="collapsed"
