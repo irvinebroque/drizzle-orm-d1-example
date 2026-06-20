@@ -112,5 +112,5 @@ pnpm run bench -- --url=https://drizzle-orm-d1-benchmark.roundtrip.workers.dev -
 - Reads use default Durable Object routing so D1 can serve them from replicas when available.
 - Benchmark write helpers are marked with `d1PrimaryMethods()` so replica session calls forward to the primary before running application code.
 - `createD1ObjectSession()` sends the current bookmark with each method call, waits for it inside the object, serializes calls through one session, and stores the updated bookmark returned by the object.
-- `wrangler.jsonc` uses a current compatibility date, `nodejs_compat`, generated Worker types, and observability.
+- `wrangler.jsonc` uses a current compatibility date, `nodejs_compat`, generated Worker types, and Workers Logs plus Traces.
 - The example uses one benchmark Durable Object per hostname. In a real app, choose a boundary that spreads write load naturally, such as tenant, organization, site, or user.
