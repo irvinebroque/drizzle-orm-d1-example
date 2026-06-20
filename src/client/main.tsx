@@ -388,7 +388,6 @@ function App() {
 			<div className="app-shell">
 				<header className="app-header">
 					<div className="title-block">
-						<div className="eyebrow">Cloudflare D1 fan-out benchmark</div>
 						<h1>D1 + Drizzle vs. Durable Objects SQLite + new Drizzle adapter</h1>
 						<p>
 							Compare current D1 + Drizzle against the Durable Object SQLite adapter, including
