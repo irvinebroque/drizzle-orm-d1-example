@@ -603,7 +603,6 @@ function App() {
 						<div className="section-heading">
 							<div>
 								<h2 id="controls-title">Run controls</h2>
-								<p>Measured samples are collected by calling the same JSON route repeatedly.</p>
 							</div>
 							<Tooltip
 								content="Clear the current samples."
