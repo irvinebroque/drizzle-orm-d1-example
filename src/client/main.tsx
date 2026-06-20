@@ -11,11 +11,8 @@ import {
 	ArrowsClockwise,
 	BracketsCurly,
 	ChartBar,
-	CheckCircle,
-	Clock,
 	Database,
 	Info,
-	Lightning,
 	Play,
 	Warning,
 } from "@phosphor-icons/react";
@@ -455,12 +452,6 @@ function App() {
 	const selectedStats = selectedOrderedModes
 		.map((mode) => stats[mode])
 		.filter((stat): stat is ModeStats => stat !== null);
-	const baseline = stats["d1-drizzle-sequential"];
-	const doSequential = stats["do-drizzle-sequential"];
-	const d1Parallel = stats["d1-drizzle-parallel"];
-	const d1Batch = stats["d1-raw-batch"];
-	const pipelined = stats["do-drizzle-pipelined"];
-	const appMethod = stats["do-app-method"];
 	const best = selectedStats.reduce<ModeStats | null>((current, stat) => {
 		if (!current || stat.p50 < current.p50) {
 			return stat;
@@ -765,33 +756,6 @@ function App() {
 							</div>
 						</div>
 
-						<div className="metric-grid">
-							<MetricTile
-								icon={<Clock />}
-								label="Sequential: DO vs D1"
-								value={formatSpeedup(baseline, doSequential)}
-								detail={formatSavings(baseline, doSequential) ?? "D1 sequential baseline"}
-							/>
-							<MetricTile
-								icon={<Lightning />}
-								label="Pipeline: DO vs D1 parallel"
-								value={formatSpeedup(d1Parallel, pipelined)}
-								detail={formatSavings(d1Parallel, pipelined) ?? "D1 parallel baseline"}
-							/>
-							<MetricTile
-								icon={<ChartBar />}
-								label="D1 batch control"
-								value={d1Batch ? formatMs(d1Batch.p50) : "Run needed"}
-								detail="Current D1, no Drizzle"
-							/>
-							<MetricTile
-								icon={<CheckCircle />}
-								label="Method: DO vs D1"
-								value={formatSpeedup(baseline, appMethod)}
-								detail={formatSavings(baseline, appMethod) ?? "D1 sequential baseline"}
-							/>
-						</div>
-
 						<PerformanceBars
 							modes={selectedOrderedModes}
 							runs={runs}
@@ -844,29 +808,6 @@ type ModeStats = {
 	p50: number;
 	p95: number;
 };
-
-function MetricTile({
-	detail,
-	icon,
-	label,
-	value,
-}: {
-	detail?: string | undefined;
-	icon: React.ReactNode;
-	label: string;
-	value: string;
-}) {
-	return (
-		<div className="metric-tile">
-			<div className="metric-icon">{icon}</div>
-			<div>
-				<span>{label}</span>
-				<strong>{value}</strong>
-				{detail && <small>{detail}</small>}
-			</div>
-		</div>
-	);
-}
 
 function PerformanceBars({
 	modes,
@@ -1227,28 +1168,6 @@ function formatMs(value: number): string {
 		return "-";
 	}
 	return `${value >= 100 ? value.toFixed(0) : value.toFixed(1)} ms`;
-}
-
-function formatSavings(baseline: ModeStats | null, compared: ModeStats | null): string | undefined {
-	if (!baseline || !compared) {
-		return undefined;
-	}
-	const saved = baseline.p50 - compared.p50;
-	if (saved <= 0) {
-		return "no p50 saving";
-	}
-	return `${formatMs(saved)} saved`;
-}
-
-function formatSpeedup(baseline: ModeStats | null, compared: ModeStats | null): string {
-	if (!baseline || !compared) {
-		return "-";
-	}
-	const speedup = baseline.p50 / compared.p50;
-	if (!Number.isFinite(speedup) || speedup <= 0) {
-		return "-";
-	}
-	return formatMultiplier(speedup);
 }
 
 function formatMultiplier(value: number): string {
