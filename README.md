@@ -5,7 +5,7 @@ This Worker compares a query-heavy route across current Cloudflare D1 + Drizzle 
 - [irvinebroque/drizzle-orm#1](https://github.com/irvinebroque/drizzle-orm/pull/1)
 - [irvinebroque/cloudflare-docs-d1-vnext#7](https://github.com/irvinebroque/cloudflare-docs-d1-vnext/pull/7)
 
-The benchmark route simulates server-side rendering a post page. Each request performs the same six logical reads:
+The benchmark route simulates server-side rendering a post page. Each request performs the same 10 logical reads:
 
 1. post
 2. author
@@ -13,23 +13,27 @@ The benchmark route simulates server-side rendering a post page. Each request pe
 4. comment count
 5. latest comments
 6. tags
+7. previous post by the same author
+8. next post by the same author
+9. author post count
+10. top tags for the same author
 
 ## Benchmark Modes
 
 Sequential reads:
 
-- `d1-drizzle-sequential`: current D1 binding with `drizzle-orm/d1`, six awaited Drizzle queries.
-- `do-drizzle-sequential`: new `drizzle-orm/d1-object` remote Drizzle client, six awaited calls to the Durable Object.
+- `d1-drizzle-sequential`: current D1 binding with `drizzle-orm/d1`, 10 awaited Drizzle queries.
+- `do-drizzle-sequential`: new `drizzle-orm/d1-object` remote Drizzle client, 10 awaited calls to the Durable Object.
 
 Batch / pipeline:
 
 - `d1-drizzle-parallel`: current D1 binding with the same Drizzle queries started together.
 - `d1-raw-batch`: current D1 binding with raw [`env.DB.batch()`](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch) as the old-model control case. This mode does not use Drizzle.
-- `do-drizzle-pipelined`: new adapter with all six Drizzle calls issued before awaiting.
+- `do-drizzle-pipelined`: new adapter with all 10 Drizzle calls issued before awaiting.
 
 Durable Object method:
 
-- `do-app-method`: one Durable Object RPC method runs the six Drizzle queries next to SQLite.
+- `do-app-method`: one Durable Object RPC method runs the 10 Drizzle queries next to SQLite.
 
 ## Programming Model Trade-offs
 

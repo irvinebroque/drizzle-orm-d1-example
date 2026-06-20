@@ -1,4 +1,4 @@
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { drizzle as d1Drizzle } from "drizzle-orm/d1";
 import {
 	createD1ObjectSession,
@@ -25,6 +25,7 @@ const JSON_HEADERS = {
 	"content-type": "application/json; charset=utf-8",
 };
 const DEFAULT_POST_ID = 42;
+const QUERY_COUNT_PER_RENDER = 10;
 const BENCHMARK_OBJECT_NAME = "bench:default";
 const D1_BATCH_CHUNK_SIZE = 500;
 const D1_SCHEMA_STATEMENTS = [
@@ -107,6 +108,10 @@ type TagSummary = {
 	name: string;
 };
 
+type TagUsage = TagSummary & {
+	postCount: number;
+};
+
 type PostPageData = {
 	post: Post | null;
 	author: Author | null;
@@ -114,6 +119,10 @@ type PostPageData = {
 	commentCount: number;
 	latestComments: LatestComment[];
 	tags: TagSummary[];
+	previousPost: RecentPost | null;
+	nextPost: RecentPost | null;
+	authorPostCount: number;
+	authorTopTags: TagUsage[];
 };
 
 type BenchmarkResult = {
@@ -228,7 +237,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
 	if (request.method === "GET" && url.pathname === "/bench/modes") {
 		return Response.json({
 			modes: BENCHMARK_MODES,
-			queryCountPerRender: 6,
+			queryCountPerRender: QUERY_COUNT_PER_RENDER,
 			defaultPostId: DEFAULT_POST_ID,
 			scenario: benchmarkScenario(),
 		});
@@ -282,7 +291,7 @@ function benchmarkInfo() {
 		name: "drizzle-orm-d1-benchmark",
 		defaultPostId: DEFAULT_POST_ID,
 		modes: BENCHMARK_MODES,
-		queryCountPerRender: 6,
+		queryCountPerRender: QUERY_COUNT_PER_RENDER,
 		scenario: benchmarkScenario(),
 		endpoints: {
 			modes: "/bench/modes",
@@ -296,7 +305,7 @@ function benchmarkInfo() {
 function benchmarkScenario() {
 	return {
 		route: "server-rendered post page",
-		queryCount: 6,
+		queryCount: QUERY_COUNT_PER_RENDER,
 		queries: [
 			"post",
 			"author",
@@ -304,6 +313,10 @@ function benchmarkScenario() {
 			"comment count",
 			"latest comments",
 			"tags",
+			"previous post by the same author",
+			"next post by the same author",
+			"author post count",
+			"top tags for the same author",
 		],
 	};
 }
@@ -342,7 +355,7 @@ async function runBenchmarkMode(
 		return {
 			mode,
 			postId,
-			queryCount: 6,
+			queryCount: QUERY_COUNT_PER_RENDER,
 			elapsedMs: elapsed(startedAt),
 			data,
 			d1Meta: meta,
@@ -359,7 +372,7 @@ async function runBenchmarkMode(
 		return {
 			mode,
 			postId,
-			queryCount: 6,
+			queryCount: QUERY_COUNT_PER_RENDER,
 			elapsedMs: elapsed(startedAt),
 			data,
 		};
@@ -380,7 +393,7 @@ async function runBenchmarkMode(
 		return withOptionalBookmark({
 			mode,
 			postId,
-			queryCount: 6,
+			queryCount: QUERY_COUNT_PER_RENDER,
 			elapsedMs: elapsed(startedAt),
 			data,
 		}, db.d1.getBookmark());
@@ -394,7 +407,7 @@ async function runBenchmarkMode(
 	return withOptionalBookmark({
 		mode,
 		postId,
-		queryCount: 6,
+		queryCount: QUERY_COUNT_PER_RENDER,
 		elapsedMs: elapsed(startedAt),
 		data,
 		d1ObjectEvents: events,
@@ -407,15 +420,41 @@ async function readPostPageWithDrizzle(
 	execution: "parallel" | "sequential",
 ): Promise<PostPageData> {
 	if (execution === "parallel") {
-		const [post, author, recentPosts, commentCount, latestComments, postTagsList] = await Promise.all([
+		const [
+			post,
+			author,
+			recentPosts,
+			commentCount,
+			latestComments,
+			postTagsList,
+			previousPost,
+			nextPost,
+			authorPostCount,
+			authorTopTags,
+		] = await Promise.all([
 			selectPost(db, postId),
 			selectAuthorForPost(db, postId),
 			selectRecentPostsForPostAuthor(db, postId),
 			selectCommentCount(db, postId),
 			selectLatestComments(db, postId),
 			selectTagsForPost(db, postId),
+			selectPreviousPostForPostAuthor(db, postId),
+			selectNextPostForPostAuthor(db, postId),
+			selectPostCountForPostAuthor(db, postId),
+			selectTopTagsForPostAuthor(db, postId),
 		]);
-		return { post, author, recentPosts, commentCount, latestComments, tags: postTagsList };
+		return {
+			post,
+			author,
+			recentPosts,
+			commentCount,
+			latestComments,
+			tags: postTagsList,
+			previousPost,
+			nextPost,
+			authorPostCount,
+			authorTopTags,
+		};
 	}
 
 	const post = await selectPost(db, postId);
@@ -424,7 +463,22 @@ async function readPostPageWithDrizzle(
 	const commentCount = await selectCommentCount(db, postId);
 	const latestComments = await selectLatestComments(db, postId);
 	const postTagsList = await selectTagsForPost(db, postId);
-	return { post, author, recentPosts, commentCount, latestComments, tags: postTagsList };
+	const previousPost = await selectPreviousPostForPostAuthor(db, postId);
+	const nextPost = await selectNextPostForPostAuthor(db, postId);
+	const authorPostCount = await selectPostCountForPostAuthor(db, postId);
+	const authorTopTags = await selectTopTagsForPostAuthor(db, postId);
+	return {
+		post,
+		author,
+		recentPosts,
+		commentCount,
+		latestComments,
+		tags: postTagsList,
+		previousPost,
+		nextPost,
+		authorPostCount,
+		authorTopTags,
+	};
 }
 
 async function selectPost(db: AnyDrizzleDatabase, postId: number): Promise<Post | null> {
@@ -501,6 +555,72 @@ async function selectTagsForPost(db: AnyDrizzleDatabase, postId: number): Promis
 	return rows as TagSummary[];
 }
 
+async function selectPreviousPostForPostAuthor(db: AnyDrizzleDatabase, postId: number): Promise<RecentPost | null> {
+	const row = await db.select({
+		id: posts.id,
+		authorId: posts.authorId,
+		title: posts.title,
+		summary: posts.summary,
+		createdAt: posts.createdAt,
+	})
+		.from(posts)
+		.where(and(
+			sql`${posts.authorId} = (select author_id from posts where id = ${postId})`,
+			sql`${posts.createdAt} < (select created_at from posts where id = ${postId})`,
+		))
+		.orderBy(desc(posts.createdAt), desc(posts.id))
+		.limit(1)
+		.get();
+	return (row ?? null) as RecentPost | null;
+}
+
+async function selectNextPostForPostAuthor(db: AnyDrizzleDatabase, postId: number): Promise<RecentPost | null> {
+	const row = await db.select({
+		id: posts.id,
+		authorId: posts.authorId,
+		title: posts.title,
+		summary: posts.summary,
+		createdAt: posts.createdAt,
+	})
+		.from(posts)
+		.where(and(
+			sql`${posts.authorId} = (select author_id from posts where id = ${postId})`,
+			sql`${posts.createdAt} > (select created_at from posts where id = ${postId})`,
+		))
+		.orderBy(asc(posts.createdAt), asc(posts.id))
+		.limit(1)
+		.get();
+	return (row ?? null) as RecentPost | null;
+}
+
+async function selectPostCountForPostAuthor(db: AnyDrizzleDatabase, postId: number): Promise<number> {
+	const row = await db.select({
+		value: sql<number>`cast(count(*) as integer)`,
+	})
+		.from(posts)
+		.where(sql`${posts.authorId} = (select author_id from posts where id = ${postId})`)
+		.get();
+	return Number(row?.value ?? 0);
+}
+
+async function selectTopTagsForPostAuthor(db: AnyDrizzleDatabase, postId: number): Promise<TagUsage[]> {
+	const rows = await db.select({
+		id: tags.id,
+		slug: tags.slug,
+		name: tags.name,
+		postCount: sql<number>`cast(count(*) as integer)`,
+	})
+		.from(tags)
+		.innerJoin(postTags, eq(tags.id, postTags.tagId))
+		.innerJoin(posts, eq(postTags.postId, posts.id))
+		.where(sql`${posts.authorId} = (select author_id from posts where id = ${postId})`)
+		.groupBy(tags.id, tags.slug, tags.name)
+		.orderBy(desc(sql`count(*)`), tags.name)
+		.limit(5)
+		.all();
+	return rows as TagUsage[];
+}
+
 async function readPostPageWithD1Batch(
 	db: D1Database,
 	postId: number,
@@ -549,10 +669,63 @@ async function readPostPageWithD1Batch(
 			WHERE post_tags.post_id = ?
 			ORDER BY tags.name
 		`).bind(postId),
+		db.prepare(`
+			SELECT id, author_id as authorId, title, summary, created_at as createdAt
+			FROM posts
+			WHERE author_id = (SELECT author_id FROM posts WHERE id = ?)
+			  AND created_at < (SELECT created_at FROM posts WHERE id = ?)
+			ORDER BY created_at DESC, id DESC
+			LIMIT 1
+		`).bind(postId, postId),
+		db.prepare(`
+			SELECT id, author_id as authorId, title, summary, created_at as createdAt
+			FROM posts
+			WHERE author_id = (SELECT author_id FROM posts WHERE id = ?)
+			  AND created_at > (SELECT created_at FROM posts WHERE id = ?)
+			ORDER BY created_at ASC, id ASC
+			LIMIT 1
+		`).bind(postId, postId),
+		db.prepare(`
+			SELECT cast(count(*) as integer) as value
+			FROM posts
+			WHERE author_id = (SELECT author_id FROM posts WHERE id = ?)
+		`).bind(postId),
+		db.prepare(`
+			SELECT tags.id, tags.slug, tags.name, cast(count(*) as integer) as postCount
+			FROM tags
+			INNER JOIN post_tags ON tags.id = post_tags.tag_id
+			INNER JOIN posts ON post_tags.post_id = posts.id
+			WHERE posts.author_id = (SELECT author_id FROM posts WHERE id = ?)
+			GROUP BY tags.id, tags.slug, tags.name
+			ORDER BY count(*) DESC, tags.name
+			LIMIT 5
+		`).bind(postId),
 	]);
 
-	const batchResults = results as [D1Result, D1Result, D1Result, D1Result, D1Result, D1Result];
-	const [postResult, authorResult, recentResult, countResult, commentsResult, tagsResult] = batchResults;
+	const batchResults = results as [
+		D1Result,
+		D1Result,
+		D1Result,
+		D1Result,
+		D1Result,
+		D1Result,
+		D1Result,
+		D1Result,
+		D1Result,
+		D1Result,
+	];
+	const [
+		postResult,
+		authorResult,
+		recentResult,
+		countResult,
+		commentsResult,
+		tagsResult,
+		previousPostResult,
+		nextPostResult,
+		authorPostCountResult,
+		authorTopTagsResult,
+	] = batchResults;
 	return {
 		data: {
 			post: firstD1Row<Post>(postResult),
@@ -561,6 +734,10 @@ async function readPostPageWithD1Batch(
 			commentCount: Number(firstD1Row<{ value: number }>(countResult)?.value ?? 0),
 			latestComments: d1Rows<LatestComment>(commentsResult),
 			tags: d1Rows<TagSummary>(tagsResult),
+			previousPost: firstD1Row<RecentPost>(previousPostResult),
+			nextPost: firstD1Row<RecentPost>(nextPostResult),
+			authorPostCount: Number(firstD1Row<{ value: number }>(authorPostCountResult)?.value ?? 0),
+			authorTopTags: d1Rows<TagUsage>(authorTopTagsResult),
 		},
 		meta: summarizeD1Batch(batchResults),
 	};

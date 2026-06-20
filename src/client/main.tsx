@@ -74,8 +74,12 @@ type BenchmarkResult = {
 	data: {
 		post: { id: number; title: string; summary: string } | null;
 		author: { id: number; name: string } | null;
+		authorPostCount: number;
+		authorTopTags: unknown[];
 		commentCount: number;
 		latestComments: unknown[];
+		nextPost: { id: number; title: string } | null;
+		previousPost: { id: number; title: string } | null;
 		recentPosts: unknown[];
 		tags: unknown[];
 	};
@@ -114,7 +118,7 @@ const MODE_DEFINITIONS: Record<BenchmarkMode, ModeDefinition> = {
 	"d1-drizzle-sequential": {
 		accent: "#c2410c",
 		badge: "orange",
-		description: "Current D1 binding with six awaited Drizzle queries.",
+		description: "Current D1 binding with 10 awaited Drizzle queries.",
 		group: "Current D1",
 		label: "D1 + Drizzle sequential",
 		shortLabel: "D1 sequential",
@@ -122,7 +126,7 @@ const MODE_DEFINITIONS: Record<BenchmarkMode, ModeDefinition> = {
 	"d1-drizzle-parallel": {
 		accent: "#2563eb",
 		badge: "blue",
-		description: "Current D1 binding with the six Drizzle promises started together.",
+		description: "Current D1 binding with the 10 Drizzle promises started together.",
 		group: "Current D1",
 		label: "D1 + Drizzle parallel",
 		shortLabel: "D1 parallel",
@@ -159,7 +163,7 @@ const MODE_DEFINITIONS: Record<BenchmarkMode, ModeDefinition> = {
 	"do-drizzle-pipelined": {
 		accent: "#0d9488",
 		badge: "teal",
-		description: "New adapter with the same six Drizzle calls issued before awaiting.",
+		description: "New adapter with the same 10 Drizzle calls issued before awaiting.",
 		group: "Durable Object SQLite",
 		label: "DO SQLite + Drizzle pipelined",
 		shortLabel: "DO pipelined",
@@ -167,7 +171,7 @@ const MODE_DEFINITIONS: Record<BenchmarkMode, ModeDefinition> = {
 	"do-app-method": {
 		accent: "#475569",
 		badge: "neutral",
-		description: "One Durable Object RPC method runs all six reads next to SQLite.",
+		description: "One Durable Object RPC method runs all 10 reads next to SQLite.",
 		group: "Durable Object SQLite",
 		label: "DO app method",
 		shortLabel: "DO method",
@@ -197,13 +201,13 @@ type CodeGroup = {
 const COMPARISON_GROUPS: ComparisonGroup[] = [
 	{
 		baseline: "d1-drizzle-sequential",
-		description: "Make 6 read queries with Drizzle in serial",
+		description: "Make 10 read queries with Drizzle in serial",
 		modes: ["d1-drizzle-sequential", "do-drizzle-sequential"],
 		title: "Sequential reads",
 	},
 	{
 		baseline: "d1-drizzle-parallel",
-		description: "All six reads are issued together.",
+		description: "All 10 reads are issued together.",
 		modes: ["d1-drizzle-parallel", "d1-raw-batch", "do-drizzle-pipelined"],
 		title: "Batch / pipeline",
 	},
@@ -226,7 +230,11 @@ const author = await selectAuthorForPost(db, postId);
 const recentPosts = await selectRecentPostsForPostAuthor(db, postId);
 const commentCount = await selectCommentCount(db, postId);
 const latestComments = await selectLatestComments(db, postId);
-const tags = await selectTagsForPost(db, postId);`,
+const tags = await selectTagsForPost(db, postId);
+const previousPost = await selectPreviousPostForPostAuthor(db, postId);
+const nextPost = await selectNextPostForPostAuthor(db, postId);
+const authorPostCount = await selectPostCountForPostAuthor(db, postId);
+const authorTopTags = await selectTopTagsForPostAuthor(db, postId);`,
 				mode: "d1-drizzle-sequential",
 				note: "Current D1 + Drizzle. Simple, but every await waits for the previous round trip.",
 				title: "D1 sequential",
@@ -239,7 +247,11 @@ const author = await selectAuthorForPost(db, postId);
 const recentPosts = await selectRecentPostsForPostAuthor(db, postId);
 const commentCount = await selectCommentCount(db, postId);
 const latestComments = await selectLatestComments(db, postId);
-const tags = await selectTagsForPost(db, postId);`,
+const tags = await selectTagsForPost(db, postId);
+const previousPost = await selectPreviousPostForPostAuthor(db, postId);
+const nextPost = await selectNextPostForPostAuthor(db, postId);
+const authorPostCount = await selectPostCountForPostAuthor(db, postId);
+const authorTopTags = await selectTopTagsForPostAuthor(db, postId);`,
 				mode: "do-drizzle-sequential",
 				note: "Same Drizzle selectors, now sent through the Durable Object SQLite adapter.",
 				title: "DO sequential",
@@ -266,7 +278,18 @@ const tags = await selectTagsForPost(db, postId);`,
 			{
 				code: `const db = drizzle(env.DB, { schema });
 
-const [post, author, recentPosts, commentCount, latestComments, tags] =
+const [
+	post,
+	author,
+	recentPosts,
+	commentCount,
+	latestComments,
+	tags,
+	previousPost,
+	nextPost,
+	authorPostCount,
+	authorTopTags,
+] =
 	await Promise.all([
 		selectPost(db, postId),
 		selectAuthorForPost(db, postId),
@@ -274,6 +297,10 @@ const [post, author, recentPosts, commentCount, latestComments, tags] =
 		selectCommentCount(db, postId),
 		selectLatestComments(db, postId),
 		selectTagsForPost(db, postId),
+		selectPreviousPostForPostAuthor(db, postId),
+		selectNextPostForPostAuthor(db, postId),
+		selectPostCountForPostAuthor(db, postId),
+		selectTopTagsForPostAuthor(db, postId),
 	]);`,
 				mode: "d1-drizzle-parallel",
 				note: "The ergonomic current-D1 option: Drizzle queries start together, but each query is still its own D1 request.",
@@ -287,10 +314,15 @@ const [post, author, recentPosts, commentCount, latestComments, tags] =
 	env.DB.prepare("SELECT cast(count(*) as integer) ...").bind(postId),
 	env.DB.prepare("SELECT ... FROM comments INNER JOIN authors ...").bind(postId),
 	env.DB.prepare("SELECT ... FROM tags INNER JOIN post_tags ...").bind(postId),
+	env.DB.prepare("SELECT previous post ...").bind(postId),
+	env.DB.prepare("SELECT next post ...").bind(postId),
+	env.DB.prepare("SELECT author post count ...").bind(postId),
+	env.DB.prepare("SELECT author top tags ...").bind(postId),
 ]);
 
 const post = results[0].results?.[0];
-const commentCount = results[3].results?.[0]?.value;`,
+const commentCount = results[3].results?.[0]?.value;
+const authorTopTags = results[9].results ?? [];`,
 				mode: "d1-raw-batch",
 				note: "Fast, but it leaves Drizzle: raw SQL strings, manual binding, manual result mapping.",
 				title: "D1 raw batch",
@@ -298,7 +330,18 @@ const commentCount = results[3].results?.[0]?.value;`,
 			{
 				code: `const db = d1ObjectDrizzle(stub, { schema, bookmark });
 
-const [post, author, recentPosts, commentCount, latestComments, tags] =
+const [
+	post,
+	author,
+	recentPosts,
+	commentCount,
+	latestComments,
+	tags,
+	previousPost,
+	nextPost,
+	authorPostCount,
+	authorTopTags,
+] =
 	await Promise.all([
 		selectPost(db, postId),
 		selectAuthorForPost(db, postId),
@@ -306,6 +349,10 @@ const [post, author, recentPosts, commentCount, latestComments, tags] =
 		selectCommentCount(db, postId),
 		selectLatestComments(db, postId),
 		selectTagsForPost(db, postId),
+		selectPreviousPostForPostAuthor(db, postId),
+		selectNextPostForPostAuthor(db, postId),
+		selectPostCountForPostAuthor(db, postId),
+		selectTopTagsForPostAuthor(db, postId),
 	]);`,
 				mode: "do-drizzle-pipelined",
 				note: "The adapter can pipeline the calls while the application code still looks like normal Drizzle.",
@@ -352,6 +399,10 @@ const DEFAULT_QUERIES = [
 	"comment count",
 	"latest comments",
 	"tags",
+	"previous post by same author",
+	"next post by same author",
+	"author post count",
+	"top tags for same author",
 ];
 
 function initialRuns(): Record<BenchmarkMode, ModeRun> {
@@ -371,7 +422,7 @@ function App() {
 	const [benchmarkInfo, setBenchmarkInfo] = useState<BenchmarkInfo>({
 		defaultPostId: 42,
 		modes: orderModes(MODES),
-		queryCountPerRender: 6,
+		queryCountPerRender: DEFAULT_QUERIES.length,
 		scenario: { queries: DEFAULT_QUERIES },
 	});
 	const [selectedModes, setSelectedModes] = useState<BenchmarkMode[]>(() => orderModes(MODES));
@@ -1121,6 +1172,22 @@ function TraceView({ runs }: { runs: Record<BenchmarkMode, ModeRun> }) {
 								: "-"}
 						</dd>
 					</div>
+					<div>
+						<dt>Adjacent</dt>
+						<dd>
+							{latestPage
+								? `${latestPage.previousPost?.title ?? "none"} / ${latestPage.nextPost?.title ?? "none"}`
+								: "-"}
+						</dd>
+					</div>
+					<div>
+						<dt>Author scope</dt>
+						<dd>
+							{latestPage
+								? `${latestPage.authorPostCount} posts, ${latestPage.authorTopTags.length} top tags`
+								: "-"}
+						</dd>
+					</div>
 				</dl>
 			</div>
 			<div className="table-frame">
@@ -1180,7 +1247,7 @@ function ExecutionModel({
 	return (
 		<div className="model-grid">
 			<ModelLane
-				description="Six request/response turns through the current D1 binding."
+				description="Ten request/response turns through the current D1 binding."
 				icon={<Database />}
 				label="D1 sequential"
 				mode="serial"
@@ -1188,7 +1255,7 @@ function ExecutionModel({
 				stat={sequential}
 			/>
 			<ModelLane
-				description="Six Drizzle calls are issued together through the Durable Object session."
+				description="Ten Drizzle calls are issued together through the Durable Object session."
 				icon={<GitBranch />}
 				label="DO pipelined"
 				mode="parallel"
