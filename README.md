@@ -31,6 +31,12 @@ Durable Object method:
 
 - `do-app-method`: one Durable Object RPC method runs the six Drizzle queries next to SQLite.
 
+## Programming Model Trade-offs
+
+- `d1-raw-batch` is the fast current-D1 control, but it uses raw [`env.DB.batch()`](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch), prepared SQL strings, and manual result mapping instead of Drizzle.
+- `do-drizzle-pipelined` targets the same "send the work together" shape while keeping normal Drizzle selectors and `Promise.all` application code.
+- `do-app-method` collapses the route to one Durable Object RPC, but that means the page-data/business logic lives inside the Durable Object class.
+
 The deployed benchmark is available at:
 
 ```txt

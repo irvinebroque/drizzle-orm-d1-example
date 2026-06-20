@@ -188,6 +188,19 @@ type ComparisonGroup = {
 	title: string;
 };
 
+type CodeExample = {
+	code: string;
+	mode?: BenchmarkMode;
+	note: React.ReactNode;
+	title: string;
+};
+
+type CodeGroup = {
+	description: React.ReactNode;
+	examples: CodeExample[];
+	title: string;
+};
+
 const COMPARISON_GROUPS: ComparisonGroup[] = [
 	{
 		baseline: "d1-drizzle-sequential",
@@ -204,6 +217,137 @@ const COMPARISON_GROUPS: ComparisonGroup[] = [
 	{
 		description: "One RPC enters the Durable Object and the page data fan-out runs beside SQLite.",
 		modes: ["do-app-method"],
+		title: "Durable Object method",
+	},
+];
+
+const CODE_GROUPS: CodeGroup[] = [
+	{
+		description: "The sequential comparison keeps the Drizzle code shape the same and changes only where the queries run.",
+		examples: [
+			{
+				code: `const db = drizzle(env.DB, { schema });
+
+const post = await selectPost(db, postId);
+const author = await selectAuthorForPost(db, postId);
+const recentPosts = await selectRecentPostsForPostAuthor(db, postId);
+const commentCount = await selectCommentCount(db, postId);
+const latestComments = await selectLatestComments(db, postId);
+const tags = await selectTagsForPost(db, postId);`,
+				mode: "d1-drizzle-sequential",
+				note: "Current D1 + Drizzle. Simple, but every await waits for the previous round trip.",
+				title: "D1 sequential",
+			},
+			{
+				code: `const db = d1ObjectDrizzle(stub, { schema, bookmark });
+
+const post = await selectPost(db, postId);
+const author = await selectAuthorForPost(db, postId);
+const recentPosts = await selectRecentPostsForPostAuthor(db, postId);
+const commentCount = await selectCommentCount(db, postId);
+const latestComments = await selectLatestComments(db, postId);
+const tags = await selectTagsForPost(db, postId);`,
+				mode: "do-drizzle-sequential",
+				note: "Same Drizzle selectors, now sent through the Durable Object SQLite adapter.",
+				title: "DO sequential",
+			},
+		],
+		title: "Sequential awaits",
+	},
+	{
+		description: (
+			<>
+				The fast current-D1 control is raw{" "}
+				<a
+					className="inline-doc-link"
+					href="https://developers.cloudflare.com/d1/worker-api/d1-database/#batch"
+					rel="noreferrer"
+					target="_blank"
+				>
+					env.DB.batch()
+				</a>
+				; the pipelined adapter keeps the ORM query builder.
+			</>
+		),
+		examples: [
+			{
+				code: `const db = drizzle(env.DB, { schema });
+
+const [post, author, recentPosts, commentCount, latestComments, tags] =
+	await Promise.all([
+		selectPost(db, postId),
+		selectAuthorForPost(db, postId),
+		selectRecentPostsForPostAuthor(db, postId),
+		selectCommentCount(db, postId),
+		selectLatestComments(db, postId),
+		selectTagsForPost(db, postId),
+	]);`,
+				mode: "d1-drizzle-parallel",
+				note: "The ergonomic current-D1 option: Drizzle queries start together, but each query is still its own D1 request.",
+				title: "D1 parallel",
+			},
+			{
+				code: `const results = await env.DB.batch([
+	env.DB.prepare("SELECT ... FROM posts WHERE id = ?").bind(postId),
+	env.DB.prepare("SELECT ... FROM authors WHERE id = (...)").bind(postId),
+	env.DB.prepare("SELECT ... FROM posts WHERE author_id = (...)").bind(postId),
+	env.DB.prepare("SELECT cast(count(*) as integer) ...").bind(postId),
+	env.DB.prepare("SELECT ... FROM comments INNER JOIN authors ...").bind(postId),
+	env.DB.prepare("SELECT ... FROM tags INNER JOIN post_tags ...").bind(postId),
+]);
+
+const post = results[0].results?.[0];
+const commentCount = results[3].results?.[0]?.value;`,
+				mode: "d1-raw-batch",
+				note: "Fast, but it leaves Drizzle: raw SQL strings, manual binding, manual result mapping.",
+				title: "D1 raw batch",
+			},
+			{
+				code: `const db = d1ObjectDrizzle(stub, { schema, bookmark });
+
+const [post, author, recentPosts, commentCount, latestComments, tags] =
+	await Promise.all([
+		selectPost(db, postId),
+		selectAuthorForPost(db, postId),
+		selectRecentPostsForPostAuthor(db, postId),
+		selectCommentCount(db, postId),
+		selectLatestComments(db, postId),
+		selectTagsForPost(db, postId),
+	]);`,
+				mode: "do-drizzle-pipelined",
+				note: "The adapter can pipeline the calls while the application code still looks like normal Drizzle.",
+				title: "DO pipelined",
+			},
+		],
+		title: "Batch / pipeline",
+	},
+	{
+		description: "The app-method path collapses the route to one RPC, but the page-data logic now lives on the Durable Object class.",
+		examples: [
+			{
+				code: `const db = d1ObjectDrizzle<BlogDatabase, typeof schema>(stub, {
+	schema,
+	bookmark,
+});
+
+const data = await db.d1.client.renderPostPage(postId);`,
+				mode: "do-app-method",
+				note: "The Worker route is tiny because it delegates the whole page-data operation.",
+				title: "Worker route",
+			},
+			{
+				code: `export class BlogDatabase extends DrizzleD1Object<Env> {
+	db = d1ObjectDrizzle(this.ctx, { schema });
+
+	async renderPostPage(postId: number) {
+		return readPostPageWithDrizzle(this.db, postId, "sequential");
+	}
+}`,
+				mode: "do-app-method",
+				note: "That locality is the trade-off: business logic moves inside the Durable Object.",
+				title: "Durable Object method",
+			},
+		],
 		title: "Durable Object method",
 	},
 ];
@@ -427,6 +571,11 @@ function App() {
 		});
 	}
 
+	function showCodeTab() {
+		setActiveTab("code");
+		document.getElementById("details-title")?.scrollIntoView({ behavior: "smooth", block: "start" });
+	}
+
 	return (
 		<TooltipProvider>
 			<div className="app-shell">
@@ -570,10 +719,27 @@ function App() {
 								<h2 id="comparison-title">Live comparison</h2>
 								<p>Bars use Worker elapsed time p50. Shorter is better.</p>
 							</div>
-							<Badge variant={running ? "warning" : best ? "success" : "secondary"}>
-								{running ? "Running" : best ? "Ready" : "No samples"}
-							</Badge>
+							<div className="heading-actions">
+								<Tooltip
+									content="Show the code shape for each benchmark mode."
+									render={(
+										<Button
+											icon={BracketsCurly}
+											onClick={showCodeTab}
+											size="sm"
+											variant="secondary"
+										>
+											Code
+										</Button>
+									)}
+								/>
+								<Badge variant={running ? "warning" : best ? "success" : "secondary"}>
+									{running ? "Running" : best ? "Ready" : "No samples"}
+								</Badge>
+							</div>
 						</div>
+
+						<ProgrammingTradeoffs />
 
 						<div className="metric-grid">
 							<MetricTile
@@ -621,6 +787,7 @@ function App() {
 							size="sm"
 							tabs={[
 								{ label: "Results", value: "results" },
+								{ label: "Code", value: "code" },
 								{ label: "Trace", value: "trace" },
 								{ label: "Model", value: "model" },
 							]}
@@ -636,6 +803,7 @@ function App() {
 							stats={stats}
 						/>
 					)}
+					{activeTab === "code" && <CodeExamples />}
 					{activeTab === "trace" && <TraceView runs={runs} />}
 					{activeTab === "model" && (
 						<ExecutionModel
@@ -681,6 +849,42 @@ function MetricTile({
 				<strong>{value}</strong>
 				{detail && <small>{detail}</small>}
 			</div>
+		</div>
+	);
+}
+
+function ProgrammingTradeoffs() {
+	return (
+		<div className="tradeoff-strip" aria-label="Programming model trade-offs">
+			<article className="tradeoff-card highlight">
+				<span>Fast and ORM-shaped</span>
+				<strong>DO pipelined</strong>
+				<p>
+					Keeps the Drizzle selectors and <code>Promise.all</code> shape. The adapter pipelines
+					the calls to Durable Object SQLite.
+				</p>
+			</article>
+			<article className="tradeoff-card">
+				<span>Fast control, raw API</span>
+				<strong>D1 batch</strong>
+				<p>
+					Can land near pipelined latency, but it uses raw{" "}
+					<a
+						className="inline-doc-link"
+						href="https://developers.cloudflare.com/d1/worker-api/d1-database/#batch"
+						rel="noreferrer"
+						target="_blank"
+					>
+						env.DB.batch()
+					</a>
+					, not Drizzle.
+				</p>
+			</article>
+			<article className="tradeoff-card">
+				<span>Fastest shape, more coupling</span>
+				<strong>DO method</strong>
+				<p>One RPC is clean on the route, but the page-data logic moves into the Durable Object.</p>
+			</article>
 		</div>
 	);
 }
@@ -756,6 +960,39 @@ function PerformanceBars({
 						);
 					})}
 				</div>
+			))}
+		</div>
+	);
+}
+
+function CodeExamples() {
+	return (
+		<div className="code-model" id="code-shapes">
+			{CODE_GROUPS.map((group) => (
+				<section className="code-group" key={group.title}>
+					<div className="code-group-heading">
+						<h3>{group.title}</h3>
+						<p>{group.description}</p>
+					</div>
+					<div className="code-card-grid">
+						{group.examples.map((example) => (
+							<article className="code-card" key={`${group.title}-${example.title}`}>
+								<div className="code-card-header">
+									<div>
+										<strong>{example.title}</strong>
+										<p>{example.note}</p>
+									</div>
+									{example.mode && (
+										<Badge variant={MODE_DEFINITIONS[example.mode].badge}>
+											{MODE_DEFINITIONS[example.mode].shortLabel}
+										</Badge>
+									)}
+								</div>
+								<pre><code>{example.code}</code></pre>
+							</article>
+						))}
+					</div>
+				</section>
 			))}
 		</div>
 	);
