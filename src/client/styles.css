@@ -477,7 +477,7 @@ h3 {
 }
 
 .table-frame table {
-	min-width: 920px;
+	min-width: 640px;
 }
 
 .table-mode-name {
@@ -493,58 +493,6 @@ h3 {
 	flex: 0 0 auto;
 	height: 9px;
 	width: 9px;
-}
-
-.transport-badges {
-	align-items: center;
-	display: flex;
-	flex-wrap: wrap;
-	gap: 6px;
-}
-
-.transport-pill {
-	align-items: center;
-	border-radius: 999px;
-	display: inline-flex;
-	font-size: 0.72rem;
-	font-weight: 760;
-	line-height: 1;
-	min-height: 22px;
-	padding: 5px 9px;
-	text-decoration: none;
-	white-space: nowrap;
-}
-
-.transport-pill.current {
-	background: #fef3c7;
-	color: #92400e;
-}
-
-.transport-pill.object {
-	background: #ccfbf1;
-	color: #0f766e;
-}
-
-.transport-pill.drizzle {
-	background: #eef2ff;
-	color: #3730a3;
-}
-
-.transport-pill.raw {
-	background: #dcfce7;
-	color: #047857;
-	text-decoration: underline;
-	text-underline-offset: 2px;
-}
-
-.transport-pill.no-drizzle {
-	background: #fee2e2;
-	color: #991b1b;
-}
-
-.transport-pill.method {
-	background: #e2e8f0;
-	color: #334155;
 }
 
 .code-model {
