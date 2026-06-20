@@ -395,17 +395,6 @@ function App() {
 							the promise-pipelined path that removes the per-query request waterfall.
 						</p>
 					</div>
-					<div className="header-facts" aria-label="Benchmark facts">
-						<div>
-							<strong>{benchmarkInfo.queryCountPerRender}</strong>
-							<span>queries per render</span>
-						</div>
-						<div>
-							<strong>{selectedModes.length}</strong>
-							<span>modes selected</span>
-						</div>
-						<Badge variant="beta">adapter PR</Badge>
-					</div>
 				</header>
 
 				{banner && (
