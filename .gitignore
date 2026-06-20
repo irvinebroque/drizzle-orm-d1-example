@@ -1,4 +1,10 @@
-.wrangler
-node_modules
-.vscode
+.dev.vars
+.drizzle-pr/
+.wrangler/
+worker-configuration.d.ts
+dist/
+.client-dist/
+src/generated/
+node_modules/
+.vscode/
 wrangler.toml
