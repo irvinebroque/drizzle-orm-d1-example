@@ -702,7 +702,6 @@ function App() {
 										<span>
 											<span className="mode-option-top">
 												<span>{definition.shortLabel}</span>
-												<Badge variant={definition.badge}>{definition.group}</Badge>
 											</span>
 											<small>{definition.description}</small>
 										</span>
