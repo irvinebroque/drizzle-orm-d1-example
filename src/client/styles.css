@@ -367,18 +367,6 @@ h3 {
 	max-width: 520px;
 }
 
-.bar-group-heading > span {
-	background: #f1f5f9;
-	border-radius: 999px;
-	color: #475569;
-	flex: 0 0 auto;
-	font-size: 0.7rem;
-	font-weight: 760;
-	line-height: 1;
-	padding: 6px 8px;
-	white-space: nowrap;
-}
-
 .bar-row {
 	align-items: center;
 	display: grid;

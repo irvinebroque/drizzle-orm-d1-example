@@ -927,11 +927,6 @@ function PerformanceBars({
 							<h3>{group.title}</h3>
 							<p>{group.description}</p>
 						</div>
-						<span>
-							{group.baseline
-								? `${MODE_DEFINITIONS[group.baseline].shortLabel} baseline`
-								: "standalone control"}
-						</span>
 					</div>
 					{group.modes.map((mode) => {
 						const stat = stats[mode];
