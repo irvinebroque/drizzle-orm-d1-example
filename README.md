@@ -1,91 +1,102 @@
-# Drizzle ORM with D1 application objects
+# Drizzle ORM D1 benchmark
 
-This example uses the new D1 application-object model from the preview work in:
+This Worker compares a query-heavy route across current Cloudflare D1 + Drizzle and the new Drizzle D1 application-object adapter from:
 
 - [irvinebroque/drizzle-orm#1](https://github.com/irvinebroque/drizzle-orm/pull/1)
-- [irvinebroque/cloudflare-docs-d1-vnext#3](https://github.com/irvinebroque/cloudflare-docs-d1-vnext/pull/3)
+- [irvinebroque/cloudflare-docs-d1-vnext#7](https://github.com/irvinebroque/cloudflare-docs-d1-vnext/pull/7)
 
-The front Worker does not bind to a D1 database or call `env.DB.prepare()`. It routes each request to a SQLite-backed Durable Object. The `BlogDatabase` object owns the database, creates the Drizzle client with `drizzle(this.ctx, { schema })`, uses `DrizzleD1Object` for D1 runtime setup, and marks write methods with `d1PrimaryMethods()` so session calls forward to the primary before application code runs.
+The benchmark route simulates server-side rendering a post page. Each request performs the same six logical reads:
 
-## Status
+1. post
+2. author
+3. recent posts by the same author
+4. comment count
+5. latest comments
+6. tags
 
-The `drizzle-orm/d1-object` adapter is not on npm yet. `package.json` points at expected release versions so the example does not accidentally install the older packages that do not include this driver.
+## Benchmark Modes
 
-To try it before publication, build and install the packages from the fork instead of running `pnpm install` directly:
+- `d1-drizzle-sequential`: current D1 binding with `drizzle-orm/d1`, six awaited Drizzle queries.
+- `d1-drizzle-parallel`: current D1 binding with the same Drizzle queries started together.
+- `d1-raw-batch`: current D1 binding with raw [`env.DB.batch()`](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch) as the old-model control case.
+- `do-drizzle-sequential`: new `drizzle-orm/d1-object` remote Drizzle client, six awaited calls to the Durable Object.
+- `do-drizzle-pipelined`: new adapter with all six Drizzle calls issued before awaiting.
+- `do-app-method`: one Durable Object RPC method runs the six Drizzle queries next to SQLite.
+
+The deployed benchmark is available at:
+
+```txt
+https://drizzle-orm-d1-benchmark.roundtrip.workers.dev
+```
+
+Open that URL for the interactive Kumo UI dashboard. It lets you seed the fixture,
+choose benchmark modes, change the post/sample counts, run the comparison in the
+browser, and inspect the p50/p95 latency bars plus Durable Object query traces.
+
+The JSON API is still available under `/bench/*`. The old root metadata response
+now lives at `/bench/info`.
+
+## Install
+
+The D1 object adapter is not published on npm yet. Build and install the fork tarballs with:
 
 ```sh
 pnpm run use-drizzle-pr
 ```
 
-That script clones `irvinebroque/drizzle-orm`, checks out `d1-object-adapter`, builds `drizzle-orm` and `drizzle-kit`, rewrites the local dependency specs to the generated tarballs, and installs them into this project.
+The PR branch guards the new bookmark/read-replication helpers so this demo deploys on the current Cloudflare runtime while still using the adapter's pipelined session shape.
 
-## Project layout
-
-- `src/index.ts` exports the Worker and the `BlogDatabase` Durable Object.
-- `src/schema.ts` defines the Drizzle SQLite schema.
-- `drizzle.config.ts` uses `driver: "d1-object"` for generated bundled migrations.
-- `drizzle/migrations.js` bundles SQL migrations so the object can apply them on the primary.
-- `wrangler.jsonc` binds `BLOG_DATABASE` as a SQLite Durable Object and records the Durable Object class migration.
-
-## Run locally
-
-After the adapter is published, install dependencies normally:
-
-```sh
-pnpm install
-```
-
-Generate Worker binding types after changing `wrangler.jsonc`:
+## Run Locally
 
 ```sh
 pnpm run cf-typegen
-```
-
-Start the Worker:
-
-```sh
+pnpm run typecheck
 pnpm run dev
 ```
 
-Create a post:
+The dev/deploy/typecheck scripts run `pnpm run build:client` first. That bundles
+the React + [Kumo](https://kumo-ui.com/) dashboard from `src/client/*` into
+generated Worker assets under `src/generated/*`.
+
+Seed local D1 and the local Durable Object:
 
 ```sh
-curl -i http://localhost:8787/posts \
-  -X POST \
-  -H "content-type: application/json" \
-  --data '{"title":"Hello D1","body":"This row lives in Durable Object SQLite.","authorEmail":"brendan@example.com"}'
+curl -X POST "http://localhost:8787/bench/seed?authors=12&posts=150&comments=900&tags=12"
 ```
 
-Copy the `x-d1-bookmark` response header into later reads when you need read-your-writes consistency:
+Run a single mode:
 
 ```sh
-curl -i http://localhost:8787/posts \
-  -H "x-d1-bookmark: <bookmark-from-write-response>"
+curl "http://localhost:8787/bench/render-post/42?mode=do-drizzle-pipelined"
 ```
 
-## Migrations
-
-Generate migrations after editing `src/schema.ts`:
+Run the benchmark script:
 
 ```sh
-pnpm run generate
+pnpm run bench -- --url=http://localhost:8787 --iterations=20 --warmup=3
 ```
 
-Apply bundled migrations through an object method. `applyDrizzleMigrations()` forwards to the primary if the method is called on a replica:
+## Deploy
 
-```ts
-const id = env.BLOG_DATABASE.idFromName("site:example.com");
-const db = env.BLOG_DATABASE.get(id);
+This repo is configured for the D1 database `drizzle-orm-d1-benchmark` and the Worker `drizzle-orm-d1-benchmark`.
 
-await db.applyMigrations();
+```sh
+pnpm run dry-run
+npx wrangler d1 migrations apply drizzle-orm-d1-benchmark --remote
+pnpm run deploy
 ```
 
-Keep this behind a deploy script or authenticated admin workflow. SQL migrations for D1 application objects run inside the primary object; they are separate from Wrangler Durable Object class migrations in `wrangler.jsonc`.
+Seed and benchmark the deployed Worker:
+
+```sh
+curl -X POST "https://drizzle-orm-d1-benchmark.roundtrip.workers.dev/bench/seed?authors=12&posts=150&comments=900&tags=12"
+pnpm run bench -- --url=https://drizzle-orm-d1-benchmark.roundtrip.workers.dev --iterations=20 --warmup=3
+```
 
 ## Best-practice notes
 
 - Reads use default Durable Object routing so D1 can serve them from replicas when available.
-- Writes are marked with `d1PrimaryMethods()` so replica session calls forward to the primary before running application code.
+- Benchmark write helpers are marked with `d1PrimaryMethods()` so replica session calls forward to the primary before running application code.
 - `createD1ObjectSession()` sends the current bookmark with each method call, waits for it inside the object, serializes calls through one session, and stores the updated bookmark returned by the object.
 - `wrangler.jsonc` uses a current compatibility date, `nodejs_compat`, generated Worker types, and observability.
-- The example uses per-host object names (`site:<hostname>`). In a real app, choose a boundary that spreads write load naturally, such as tenant, organization, site, or user.
+- The example uses one benchmark Durable Object per hostname. In a real app, choose a boundary that spreads write load naturally, such as tenant, organization, site, or user.

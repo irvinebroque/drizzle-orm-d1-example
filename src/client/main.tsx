@@ -1,0 +1,1065 @@
+import { Badge } from "@cloudflare/kumo/components/badge";
+import { Banner } from "@cloudflare/kumo/components/banner";
+import { Button } from "@cloudflare/kumo/components/button";
+import { Checkbox } from "@cloudflare/kumo/components/checkbox";
+import { Input } from "@cloudflare/kumo/components/input";
+import { Table } from "@cloudflare/kumo/components/table";
+import { Tabs } from "@cloudflare/kumo/components/tabs";
+import { Tooltip, TooltipProvider } from "@cloudflare/kumo/components/tooltip";
+import "@cloudflare/kumo/styles/standalone";
+import {
+	ArrowsClockwise,
+	BracketsCurly,
+	ChartBar,
+	CheckCircle,
+	Clock,
+	Database,
+	GitBranch,
+	Info,
+	Lightning,
+	Play,
+	Warning,
+} from "@phosphor-icons/react";
+import { StrictMode, useEffect, useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
+
+import "./styles.css";
+
+const MODES = [
+	"d1-drizzle-sequential",
+	"d1-drizzle-parallel",
+	"d1-raw-batch",
+	"do-drizzle-sequential",
+	"do-drizzle-pipelined",
+	"do-app-method",
+] as const;
+
+type BenchmarkMode = typeof MODES[number];
+
+type BenchmarkInfo = {
+	modes: BenchmarkMode[];
+	queryCountPerRender: number;
+	defaultPostId: number;
+	scenario?: {
+		queries: string[];
+	};
+};
+
+type D1MetaSummary = {
+	durationMs: number;
+	rowsRead: number;
+	rowsWritten: number;
+	servedBy: string[];
+};
+
+type D1ObjectQueryEventSummary = {
+	durationMs: number;
+	forwarded: boolean;
+	method: string;
+	queryType: string;
+	rowCount: number;
+	rowsRead: number;
+	rowsWritten: number;
+	servedBy: string;
+};
+
+type BenchmarkResult = {
+	mode: BenchmarkMode;
+	postId: number;
+	queryCount: number;
+	elapsedMs: number;
+	d1Meta?: D1MetaSummary;
+	d1ObjectEvents?: D1ObjectQueryEventSummary[];
+	bookmark?: string;
+	data: {
+		post: { id: number; title: string; summary: string } | null;
+		author: { id: number; name: string } | null;
+		commentCount: number;
+		latestComments: unknown[];
+		recentPosts: unknown[];
+		tags: unknown[];
+	};
+};
+
+type RunSample = {
+	workerMs: number;
+	httpMs: number;
+	result: BenchmarkResult;
+};
+
+type ModeRun = {
+	error?: string;
+	latest?: BenchmarkResult;
+	samples: RunSample[];
+	state: "idle" | "warming" | "running" | "complete" | "error";
+	warmups: number;
+};
+
+type ModeDefinition = {
+	accent: string;
+	badge: "blue" | "green" | "neutral" | "orange" | "purple" | "teal";
+	description: React.ReactNode;
+	group: "Current D1" | "Durable Object SQLite";
+	label: string;
+	shortLabel: string;
+};
+
+type BannerState = {
+	description: string;
+	title: string;
+	variant: "default" | "alert" | "error" | "secondary";
+};
+
+const MODE_DEFINITIONS: Record<BenchmarkMode, ModeDefinition> = {
+	"d1-drizzle-sequential": {
+		accent: "#c2410c",
+		badge: "orange",
+		description: "Current D1 binding with six awaited Drizzle queries.",
+		group: "Current D1",
+		label: "D1 + Drizzle sequential",
+		shortLabel: "D1 sequential",
+	},
+	"d1-drizzle-parallel": {
+		accent: "#2563eb",
+		badge: "blue",
+		description: "Current D1 binding with the six Drizzle promises started together.",
+		group: "Current D1",
+		label: "D1 + Drizzle parallel",
+		shortLabel: "D1 parallel",
+	},
+	"d1-raw-batch": {
+		accent: "#059669",
+		badge: "green",
+		description: (
+			<>
+				Current D1 binding with raw{" "}
+				<a
+					className="inline-doc-link"
+					href="https://developers.cloudflare.com/d1/worker-api/d1-database/#batch"
+					rel="noreferrer"
+					target="_blank"
+				>
+					env.DB.batch()
+				</a>{" "}
+				as an old-model control.
+			</>
+		),
+		group: "Current D1",
+		label: "D1 raw batch",
+		shortLabel: "D1 batch",
+	},
+	"do-drizzle-sequential": {
+		accent: "#7c3aed",
+		badge: "purple",
+		description: "New remote Drizzle client, still awaiting each Durable Object call.",
+		group: "Durable Object SQLite",
+		label: "DO SQLite + Drizzle sequential",
+		shortLabel: "DO sequential",
+	},
+	"do-drizzle-pipelined": {
+		accent: "#0d9488",
+		badge: "teal",
+		description: "New adapter with the same six Drizzle calls issued before awaiting.",
+		group: "Durable Object SQLite",
+		label: "DO SQLite + Drizzle pipelined",
+		shortLabel: "DO pipelined",
+	},
+	"do-app-method": {
+		accent: "#475569",
+		badge: "neutral",
+		description: "One Durable Object RPC method runs all six reads next to SQLite.",
+		group: "Durable Object SQLite",
+		label: "DO app method",
+		shortLabel: "DO method",
+	},
+};
+
+const DEFAULT_QUERIES = [
+	"post",
+	"author",
+	"recent posts by same author",
+	"comment count",
+	"latest comments",
+	"tags",
+];
+
+function initialRuns(): Record<BenchmarkMode, ModeRun> {
+	const runs = {} as Record<BenchmarkMode, ModeRun>;
+	for (const mode of MODES) {
+		runs[mode] = { samples: [], state: "idle", warmups: 0 };
+	}
+	return runs;
+}
+
+function App() {
+	const [benchmarkInfo, setBenchmarkInfo] = useState<BenchmarkInfo>({
+		defaultPostId: 42,
+		modes: [...MODES],
+		queryCountPerRender: 6,
+		scenario: { queries: DEFAULT_QUERIES },
+	});
+	const [selectedModes, setSelectedModes] = useState<BenchmarkMode[]>([...MODES]);
+	const [postId, setPostId] = useState("42");
+	const [iterations, setIterations] = useState("8");
+	const [warmup, setWarmup] = useState("2");
+	const [runs, setRuns] = useState<Record<BenchmarkMode, ModeRun>>(() => initialRuns());
+	const [activeTab, setActiveTab] = useState("results");
+	const [running, setRunning] = useState(false);
+	const [seeding, setSeeding] = useState(false);
+	const [banner, setBanner] = useState<BannerState | null>(null);
+	const [seedOptions, setSeedOptions] = useState({
+		authors: "12",
+		comments: "900",
+		posts: "150",
+		tags: "12",
+	});
+
+	useEffect(() => {
+		let active = true;
+		void fetchJson<BenchmarkInfo>("/bench/modes")
+			.then((info) => {
+				if (!active) {
+					return;
+				}
+				setBenchmarkInfo(info);
+				setPostId(String(info.defaultPostId ?? 42));
+				setSelectedModes(info.modes);
+			})
+			.catch((error: unknown) => {
+				setBanner({
+					description: errorMessage(error),
+					title: "Could not load benchmark metadata",
+					variant: "error",
+				});
+			});
+		return () => {
+			active = false;
+		};
+	}, []);
+
+	const stats = useMemo(() => summarizeRuns(runs), [runs]);
+	const selectedStats = selectedModes
+		.map((mode) => stats[mode])
+		.filter((stat): stat is ModeStats => stat !== null);
+	const baseline = stats["d1-drizzle-sequential"];
+	const pipelined = stats["do-drizzle-pipelined"];
+	const appMethod = stats["do-app-method"];
+	const best = selectedStats.reduce<ModeStats | null>((current, stat) => {
+		if (!current || stat.p50 < current.p50) {
+			return stat;
+		}
+		return current;
+	}, null);
+	const completedCount = selectedStats.reduce((total, stat) => total + stat.count, 0);
+
+	async function runBenchmark() {
+		const parsedPostId = boundedInteger(postId, 1, 10_000, benchmarkInfo.defaultPostId);
+		const parsedIterations = boundedInteger(iterations, 1, 50, 8);
+		const parsedWarmup = boundedInteger(warmup, 0, 20, 2);
+		const modes = selectedModes.filter((mode) => benchmarkInfo.modes.includes(mode));
+
+		if (modes.length === 0) {
+			setBanner({
+				description: "Select at least one benchmark mode before running.",
+				title: "No modes selected",
+				variant: "alert",
+			});
+			return;
+		}
+
+		setRunning(true);
+		setBanner({
+			description: `${modes.length} modes, ${parsedIterations} measured samples per mode, ${parsedWarmup} warmup requests.`,
+			title: "Benchmark running",
+			variant: "secondary",
+		});
+		setRuns((previous) => {
+			const next = { ...previous };
+			for (const mode of modes) {
+				next[mode] = { samples: [], state: parsedWarmup > 0 ? "warming" : "running", warmups: 0 };
+			}
+			return next;
+		});
+
+		try {
+			const bookmarks: Partial<Record<BenchmarkMode, string>> = {};
+			for (const mode of modes) {
+				for (let index = 0; index < parsedWarmup + parsedIterations; index++) {
+					const warming = index < parsedWarmup;
+					setRuns((previous) => ({
+						...previous,
+						[mode]: {
+							...previous[mode],
+							state: warming ? "warming" : "running",
+							warmups: Math.min(index + 1, parsedWarmup),
+						},
+					}));
+
+					const sample = await fetchRender(parsedPostId, mode, bookmarks[mode]);
+					if (sample.result.bookmark) {
+						bookmarks[mode] = sample.result.bookmark;
+					}
+
+					setRuns((previous) => {
+						const current = previous[mode];
+						return {
+							...previous,
+							[mode]: {
+								...current,
+								latest: sample.result,
+								samples: warming ? current.samples : [...current.samples, sample],
+								state: "running",
+							},
+						};
+					});
+				}
+				setRuns((previous) => ({
+					...previous,
+					[mode]: {
+						...previous[mode],
+						state: "complete",
+					},
+				}));
+			}
+			setBanner({
+				description: "Results are measured inside the Worker, with browser-observed latency shown as a secondary value.",
+				title: "Benchmark complete",
+				variant: "default",
+			});
+		} catch (error: unknown) {
+			setBanner({
+				description: errorMessage(error),
+				title: "Benchmark failed",
+				variant: "error",
+			});
+		} finally {
+			setRunning(false);
+		}
+	}
+
+	async function seedFixture() {
+		setSeeding(true);
+		setBanner({
+			description: "Seeding current D1 and the Durable Object SQLite store with the same fixture.",
+			title: "Seeding fixture",
+			variant: "secondary",
+		});
+		try {
+			const params = new URLSearchParams({
+				authors: String(boundedInteger(seedOptions.authors, 1, 100, 12)),
+				comments: String(boundedInteger(seedOptions.comments, 0, 20_000, 900)),
+				posts: String(boundedInteger(seedOptions.posts, 1, 5_000, 150)),
+				reset: "true",
+				tags: String(boundedInteger(seedOptions.tags, 1, 100, 12)),
+			});
+			await fetchJson(`/bench/seed?${params.toString()}`, { method: "POST" });
+			setBanner({
+				description: "Both stores now have matching benchmark data. Run the comparison again to refresh the chart.",
+				title: "Fixture seeded",
+				variant: "default",
+			});
+		} catch (error: unknown) {
+			setBanner({
+				description: errorMessage(error),
+				title: "Seed failed",
+				variant: "error",
+			});
+		} finally {
+			setSeeding(false);
+		}
+	}
+
+	function clearResults() {
+		setRuns(initialRuns());
+		setBanner(null);
+	}
+
+	function toggleMode(mode: BenchmarkMode, checked: boolean) {
+		setSelectedModes((previous) => {
+			if (checked) {
+				return previous.includes(mode) ? previous : [...previous, mode];
+			}
+			return previous.filter((item) => item !== mode);
+		});
+	}
+
+	return (
+		<TooltipProvider>
+			<div className="app-shell">
+				<header className="app-header">
+					<div className="title-block">
+						<div className="eyebrow">Cloudflare D1 fan-out benchmark</div>
+						<h1>D1 + Drizzle vs. Durable Objects SQLite + new Drizzle adapter</h1>
+						<p>
+							Compare current D1 + Drizzle against the Durable Object SQLite adapter, including
+							the promise-pipelined path that removes the per-query request waterfall.
+						</p>
+					</div>
+					<div className="header-facts" aria-label="Benchmark facts">
+						<div>
+							<strong>{benchmarkInfo.queryCountPerRender}</strong>
+							<span>queries per render</span>
+						</div>
+						<div>
+							<strong>{selectedModes.length}</strong>
+							<span>modes selected</span>
+						</div>
+						<Badge variant="beta">adapter PR</Badge>
+					</div>
+				</header>
+
+				{banner && (
+					<Banner
+						icon={banner.variant === "error" ? <Warning weight="fill" /> : <Info weight="fill" />}
+						title={banner.title}
+						description={banner.description}
+						variant={banner.variant}
+					/>
+				)}
+
+				<main className="dashboard-grid">
+					<section className="panel controls-panel" aria-labelledby="controls-title">
+						<div className="section-heading">
+							<div>
+								<h2 id="controls-title">Run controls</h2>
+								<p>Measured samples are collected by calling the same JSON route repeatedly.</p>
+							</div>
+							<Tooltip
+								content="Clear the current samples."
+								render={(
+									<Button
+										aria-label="Clear results"
+										disabled={running}
+										icon={ArrowsClockwise}
+										onClick={clearResults}
+										shape="square"
+										size="sm"
+									/>
+								)}
+							/>
+						</div>
+
+						<div className="control-grid">
+							<Input
+								inputMode="numeric"
+								label="Post ID"
+								onChange={(event) => setPostId(event.currentTarget.value)}
+								size="sm"
+								value={postId}
+							/>
+							<Input
+								inputMode="numeric"
+								label="Samples"
+								onChange={(event) => setIterations(event.currentTarget.value)}
+								size="sm"
+								value={iterations}
+							/>
+							<Input
+								inputMode="numeric"
+								label="Warmup"
+								onChange={(event) => setWarmup(event.currentTarget.value)}
+								size="sm"
+								value={warmup}
+							/>
+						</div>
+
+						<div className="button-row">
+							<Button
+								disabled={selectedModes.length === 0}
+								icon={Play}
+								loading={running}
+								onClick={runBenchmark}
+								variant="primary"
+							>
+								Run benchmark
+							</Button>
+							<Button icon={Database} loading={seeding} onClick={seedFixture} variant="secondary">
+								Seed fixture
+							</Button>
+						</div>
+
+						<div className="seed-grid" aria-label="Seed fixture sizes">
+							<Input
+								inputMode="numeric"
+								label="Authors"
+								onChange={(event) => setSeedOptions({ ...seedOptions, authors: event.currentTarget.value })}
+								size="xs"
+								value={seedOptions.authors}
+							/>
+							<Input
+								inputMode="numeric"
+								label="Posts"
+								onChange={(event) => setSeedOptions({ ...seedOptions, posts: event.currentTarget.value })}
+								size="xs"
+								value={seedOptions.posts}
+							/>
+							<Input
+								inputMode="numeric"
+								label="Comments"
+								onChange={(event) => setSeedOptions({ ...seedOptions, comments: event.currentTarget.value })}
+								size="xs"
+								value={seedOptions.comments}
+							/>
+							<Input
+								inputMode="numeric"
+								label="Tags"
+								onChange={(event) => setSeedOptions({ ...seedOptions, tags: event.currentTarget.value })}
+								size="xs"
+								value={seedOptions.tags}
+							/>
+						</div>
+
+						<div className="mode-selector" aria-label="Benchmark modes">
+							<div className="mode-selector-title">Modes</div>
+							{benchmarkInfo.modes.map((mode) => {
+								const definition = MODE_DEFINITIONS[mode];
+								return (
+									<label className="mode-option" key={mode}>
+										<Checkbox
+											checked={selectedModes.includes(mode)}
+											onCheckedChange={(checked) => toggleMode(mode, checked)}
+										/>
+										<span>
+											<span className="mode-option-top">
+												<span>{definition.shortLabel}</span>
+												<Badge variant={definition.badge}>{definition.group}</Badge>
+											</span>
+											<small>{definition.description}</small>
+										</span>
+									</label>
+								);
+							})}
+						</div>
+					</section>
+
+					<section className="panel comparison-panel" aria-labelledby="comparison-title">
+						<div className="section-heading">
+							<div>
+								<h2 id="comparison-title">Live comparison</h2>
+								<p>Bars use Worker elapsed time p50. Shorter is better.</p>
+							</div>
+							<Badge variant={running ? "warning" : best ? "success" : "secondary"}>
+								{running ? "Running" : best ? "Ready" : "No samples"}
+							</Badge>
+						</div>
+
+						<div className="metric-grid">
+							<MetricTile
+								icon={<Clock />}
+								label="D1 sequential p50"
+								value={baseline ? formatMs(baseline.p50) : "Run needed"}
+							/>
+							<MetricTile
+								icon={<Lightning />}
+								label="Best p50"
+								value={best ? formatMs(best.p50) : "No samples"}
+								detail={best ? MODE_DEFINITIONS[best.mode].shortLabel : undefined}
+							/>
+							<MetricTile
+								icon={<ChartBar />}
+								label="Pipelined vs sequential"
+								value={formatSpeedup(baseline, pipelined)}
+								detail={formatSavings(baseline, pipelined)}
+							/>
+							<MetricTile
+								icon={<CheckCircle />}
+								label="Measured samples"
+								value={String(completedCount)}
+								detail={`${selectedModes.length} selected modes`}
+							/>
+						</div>
+
+						<PerformanceBars
+							baseline={baseline}
+							modes={selectedModes}
+							runs={runs}
+							stats={stats}
+						/>
+					</section>
+				</main>
+
+				<section className="panel details-panel" aria-labelledby="details-title">
+					<div className="section-heading details-heading">
+						<div>
+							<h2 id="details-title">Benchmark detail</h2>
+							<p>The same page data is fetched every time; only the query transport changes.</p>
+						</div>
+						<Tabs
+							onValueChange={setActiveTab}
+							size="sm"
+							tabs={[
+								{ label: "Results", value: "results" },
+								{ label: "Trace", value: "trace" },
+								{ label: "Model", value: "model" },
+							]}
+							value={activeTab}
+							variant="segmented"
+						/>
+					</div>
+
+					{activeTab === "results" && (
+						<ResultsTable
+							baseline={baseline}
+							modes={selectedModes}
+							runs={runs}
+							stats={stats}
+						/>
+					)}
+					{activeTab === "trace" && <TraceView runs={runs} />}
+					{activeTab === "model" && (
+						<ExecutionModel
+							appMethod={appMethod}
+							pipelined={pipelined}
+							queries={benchmarkInfo.scenario?.queries ?? DEFAULT_QUERIES}
+							sequential={baseline}
+						/>
+					)}
+				</section>
+			</div>
+		</TooltipProvider>
+	);
+}
+
+type ModeStats = {
+	avg: number;
+	count: number;
+	httpP50: number;
+	max: number;
+	min: number;
+	mode: BenchmarkMode;
+	p50: number;
+	p95: number;
+};
+
+function MetricTile({
+	detail,
+	icon,
+	label,
+	value,
+}: {
+	detail?: string | undefined;
+	icon: React.ReactNode;
+	label: string;
+	value: string;
+}) {
+	return (
+		<div className="metric-tile">
+			<div className="metric-icon">{icon}</div>
+			<div>
+				<span>{label}</span>
+				<strong>{value}</strong>
+				{detail && <small>{detail}</small>}
+			</div>
+		</div>
+	);
+}
+
+function PerformanceBars({
+	baseline,
+	modes,
+	runs,
+	stats,
+}: {
+	baseline: ModeStats | null;
+	modes: BenchmarkMode[];
+	runs: Record<BenchmarkMode, ModeRun>;
+	stats: Record<BenchmarkMode, ModeStats | null>;
+}) {
+	const max = Math.max(1, ...modes.map((mode) => stats[mode]?.p50 ?? 0));
+	const hasSamples = modes.some((mode) => (stats[mode]?.count ?? 0) > 0);
+
+	if (!hasSamples) {
+		return (
+			<div className="empty-state">
+				<ChartBar aria-hidden />
+				<h3>No samples yet</h3>
+				<p>Run the benchmark to turn the API responses into live latency bars.</p>
+			</div>
+		);
+	}
+
+	return (
+		<div className="bar-chart" role="img" aria-label="Benchmark p50 latency comparison">
+			{modes.map((mode) => {
+				const stat = stats[mode];
+				const definition = MODE_DEFINITIONS[mode];
+				const width = stat ? Math.max(2, (stat.p50 / max) * 100) : 2;
+				const speedup = baseline && stat ? baseline.p50 / stat.p50 : null;
+				const speedupLabel = mode === "d1-drizzle-sequential"
+					? "1.00x"
+					: speedup && Number.isFinite(speedup)
+						? `${speedup.toFixed(2)}x`
+						: "-";
+				return (
+					<div className="bar-row" key={mode}>
+						<div className="bar-label">
+							<strong>{definition.shortLabel}</strong>
+							<span>{runs[mode].state}</span>
+						</div>
+						<div className="bar-track">
+							<div
+								className="bar-fill"
+								style={{
+									"--bar-color": definition.accent,
+									"--bar-width": `${width}%`,
+								} as React.CSSProperties}
+							/>
+						</div>
+						<div className="bar-value">
+							<strong>{stat ? formatMs(stat.p50) : "..."}</strong>
+							<span>{speedupLabel}</span>
+						</div>
+					</div>
+				);
+			})}
+		</div>
+	);
+}
+
+function ResultsTable({
+	baseline,
+	modes,
+	runs,
+	stats,
+}: {
+	baseline: ModeStats | null;
+	modes: BenchmarkMode[];
+	runs: Record<BenchmarkMode, ModeRun>;
+	stats: Record<BenchmarkMode, ModeStats | null>;
+}) {
+	return (
+		<div className="table-frame">
+			<Table layout="fixed">
+				<Table.Header variant="compact">
+					<Table.Row>
+						<Table.Head>Mode</Table.Head>
+						<Table.Head>Transport</Table.Head>
+						<Table.Head>p50 Worker</Table.Head>
+						<Table.Head>p95 Worker</Table.Head>
+						<Table.Head>HTTP p50</Table.Head>
+						<Table.Head>Speedup</Table.Head>
+						<Table.Head>Samples</Table.Head>
+					</Table.Row>
+				</Table.Header>
+				<Table.Body>
+					{modes.map((mode) => {
+						const definition = MODE_DEFINITIONS[mode];
+						const stat = stats[mode];
+						return (
+							<Table.Row key={mode}>
+								<Table.Cell>
+									<div className="table-mode-name">
+										<span className="mode-dot" style={{ background: definition.accent }} />
+										{definition.label}
+									</div>
+								</Table.Cell>
+								<Table.Cell>
+									<Badge variant={definition.badge}>{definition.group}</Badge>
+								</Table.Cell>
+								<Table.Cell>{stat ? formatMs(stat.p50) : statusLabel(runs[mode].state)}</Table.Cell>
+								<Table.Cell>{stat ? formatMs(stat.p95) : "-"}</Table.Cell>
+								<Table.Cell>{stat ? formatMs(stat.httpP50) : "-"}</Table.Cell>
+								<Table.Cell>{formatSpeedup(baseline, stat)}</Table.Cell>
+								<Table.Cell>{stat?.count ?? 0}</Table.Cell>
+							</Table.Row>
+						);
+					})}
+				</Table.Body>
+			</Table>
+		</div>
+	);
+}
+
+function TraceView({ runs }: { runs: Record<BenchmarkMode, ModeRun> }) {
+	const latestWithEvents = MODES
+		.map((mode) => runs[mode].latest)
+		.filter((result): result is BenchmarkResult => Boolean(result))
+		.reverse();
+	const eventRows = latestWithEvents.flatMap((result) => {
+		if (result.d1ObjectEvents && result.d1ObjectEvents.length > 0) {
+			return result.d1ObjectEvents.map((event, index) => ({ event, index, mode: result.mode }));
+		}
+		if (result.d1Meta) {
+			return [{
+				event: {
+					durationMs: result.d1Meta.durationMs,
+					forwarded: false,
+					method: "batch",
+					queryType: "read",
+					rowCount: 0,
+					rowsRead: result.d1Meta.rowsRead,
+					rowsWritten: result.d1Meta.rowsWritten,
+					servedBy: result.d1Meta.servedBy.join(", "),
+				},
+				index: 0,
+				mode: result.mode,
+			}];
+		}
+		return [];
+	});
+	const latestPage = latestWithEvents[0]?.data;
+
+	return (
+		<div className="trace-grid">
+			<div className="trace-summary">
+				<h3>Latest page payload</h3>
+				<dl>
+					<div>
+						<dt>Post</dt>
+						<dd>{latestPage?.post?.title ?? "No result yet"}</dd>
+					</div>
+					<div>
+						<dt>Author</dt>
+						<dd>{latestPage?.author?.name ?? "-"}</dd>
+					</div>
+					<div>
+						<dt>Comments</dt>
+						<dd>{latestPage?.commentCount ?? "-"}</dd>
+					</div>
+					<div>
+						<dt>Related rows</dt>
+						<dd>
+							{latestPage
+								? `${latestPage.recentPosts.length} recent, ${latestPage.latestComments.length} latest, ${latestPage.tags.length} tags`
+								: "-"}
+						</dd>
+					</div>
+				</dl>
+			</div>
+			<div className="table-frame">
+				<Table layout="fixed">
+					<Table.Header variant="compact">
+						<Table.Row>
+							<Table.Head>Mode</Table.Head>
+							<Table.Head>Call</Table.Head>
+							<Table.Head>Type</Table.Head>
+							<Table.Head>Duration</Table.Head>
+							<Table.Head>Rows read</Table.Head>
+							<Table.Head>Forwarded</Table.Head>
+						</Table.Row>
+					</Table.Header>
+					<Table.Body>
+						{eventRows.length === 0 ? (
+							<Table.Row>
+								<Table.Cell colSpan={6}>
+									Run a DO mode or raw{" "}
+									<a
+										className="inline-doc-link"
+										href="https://developers.cloudflare.com/d1/worker-api/d1-database/#batch"
+										rel="noreferrer"
+										target="_blank"
+									>
+										D1 batch API
+									</a>{" "}
+									mode to see per-call trace data.
+								</Table.Cell>
+							</Table.Row>
+						) : eventRows.map(({ event, index, mode }) => (
+							<Table.Row key={`${mode}-${index}`}>
+								<Table.Cell>{MODE_DEFINITIONS[mode].shortLabel}</Table.Cell>
+								<Table.Cell>{event.method}</Table.Cell>
+								<Table.Cell>{event.queryType}</Table.Cell>
+								<Table.Cell>{formatMs(event.durationMs)}</Table.Cell>
+								<Table.Cell>{event.rowsRead}</Table.Cell>
+								<Table.Cell>{event.forwarded ? "yes" : "no"}</Table.Cell>
+							</Table.Row>
+						))}
+					</Table.Body>
+				</Table>
+			</div>
+		</div>
+	);
+}
+
+function ExecutionModel({
+	appMethod,
+	pipelined,
+	queries,
+	sequential,
+}: {
+	appMethod: ModeStats | null;
+	pipelined: ModeStats | null;
+	queries: string[];
+	sequential: ModeStats | null;
+}) {
+	return (
+		<div className="model-grid">
+			<ModelLane
+				description="Six request/response turns through the current D1 binding."
+				icon={<Database />}
+				label="D1 sequential"
+				mode="serial"
+				queries={queries}
+				stat={sequential}
+			/>
+			<ModelLane
+				description="Six Drizzle calls are issued together through the Durable Object session."
+				icon={<GitBranch />}
+				label="DO pipelined"
+				mode="parallel"
+				queries={queries}
+				stat={pipelined}
+			/>
+			<ModelLane
+				description="One RPC enters the Durable Object and the route fan-out runs beside SQLite."
+				icon={<BracketsCurly />}
+				label="DO app method"
+				mode="collapsed"
+				queries={queries}
+				stat={appMethod}
+			/>
+		</div>
+	);
+}
+
+function ModelLane({
+	description,
+	icon,
+	label,
+	mode,
+	queries,
+	stat,
+}: {
+	description: string;
+	icon: React.ReactNode;
+	label: string;
+	mode: "collapsed" | "parallel" | "serial";
+	queries: string[];
+	stat: ModeStats | null;
+}) {
+	return (
+		<div className="model-lane">
+			<div className="model-lane-head">
+				<span>{icon}</span>
+				<div>
+					<strong>{label}</strong>
+					<small>{stat ? formatMs(stat.p50) : "run to measure p50"}</small>
+				</div>
+			</div>
+			<p>{description}</p>
+			<div className={`query-timeline ${mode}`}>
+				{queries.map((query, index) => (
+					<span
+						key={query}
+						style={{
+							"--query-index": index,
+							"--query-total": queries.length,
+						} as React.CSSProperties}
+					>
+						{query}
+					</span>
+				))}
+			</div>
+		</div>
+	);
+}
+
+async function fetchRender(postId: number, mode: BenchmarkMode, bookmark?: string): Promise<RunSample> {
+	const startedAt = performance.now();
+	const init: RequestInit = bookmark ? { headers: { "x-d1-bookmark": bookmark } } : {};
+	const result = await fetchJson<BenchmarkResult>(`/bench/render-post/${postId}?mode=${mode}`, init);
+	return {
+		httpMs: performance.now() - startedAt,
+		result,
+		workerMs: result.elapsedMs,
+	};
+}
+
+async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
+	const response = await fetch(input, init);
+	const body = await response.json().catch(() => null) as unknown;
+	if (!response.ok) {
+		const error = body && typeof body === "object" && "error" in body
+			? String((body as { error: unknown }).error)
+			: `HTTP ${response.status}`;
+		throw new Error(error);
+	}
+	return body as T;
+}
+
+function summarizeRuns(runs: Record<BenchmarkMode, ModeRun>): Record<BenchmarkMode, ModeStats | null> {
+	return Object.fromEntries(MODES.map((mode) => {
+		const samples = runs[mode].samples;
+		if (samples.length === 0) {
+			return [mode, null];
+		}
+		const workerValues = samples.map((sample) => sample.workerMs).sort((a, b) => a - b);
+		const httpValues = samples.map((sample) => sample.httpMs).sort((a, b) => a - b);
+		return [mode, {
+			avg: mean(workerValues),
+			count: workerValues.length,
+			httpP50: percentile(httpValues, 50),
+			max: workerValues[workerValues.length - 1] ?? 0,
+			min: workerValues[0] ?? 0,
+			mode,
+			p50: percentile(workerValues, 50),
+			p95: percentile(workerValues, 95),
+		}];
+	})) as Record<BenchmarkMode, ModeStats | null>;
+}
+
+function boundedInteger(value: string, min: number, max: number, fallback: number): number {
+	const parsed = Number(value);
+	if (!Number.isInteger(parsed)) {
+		return fallback;
+	}
+	return Math.min(max, Math.max(min, parsed));
+}
+
+function formatMs(value: number): string {
+	if (!Number.isFinite(value)) {
+		return "-";
+	}
+	return `${value >= 100 ? value.toFixed(0) : value.toFixed(1)} ms`;
+}
+
+function formatSavings(baseline: ModeStats | null, compared: ModeStats | null): string | undefined {
+	if (!baseline || !compared) {
+		return undefined;
+	}
+	const saved = baseline.p50 - compared.p50;
+	if (saved <= 0) {
+		return "no p50 saving";
+	}
+	return `${formatMs(saved)} saved`;
+}
+
+function formatSpeedup(baseline: ModeStats | null, compared: ModeStats | null): string {
+	if (!baseline || !compared) {
+		return "-";
+	}
+	const speedup = baseline.p50 / compared.p50;
+	if (!Number.isFinite(speedup) || speedup <= 0) {
+		return "-";
+	}
+	return `${speedup.toFixed(2)}x`;
+}
+
+function mean(values: number[]): number {
+	return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function percentile(values: number[], percentileValue: number): number {
+	const index = Math.min(values.length - 1, Math.ceil((percentileValue / 100) * values.length) - 1);
+	return values[index] ?? 0;
+}
+
+function statusLabel(state: ModeRun["state"]): string {
+	if (state === "warming") {
+		return "warming";
+	}
+	if (state === "running") {
+		return "running";
+	}
+	return "-";
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+createRoot(document.getElementById("root") as HTMLElement).render(
+	<StrictMode>
+		<App />
+	</StrictMode>,
+);

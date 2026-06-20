@@ -4,7 +4,8 @@
 		"exactOptionalPropertyTypes": true,
 		"forceConsistentCasingInFileNames": true,
 		"isolatedModules": true,
-		"lib": ["ES2022"],
+		"jsx": "react-jsx",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
 		"module": "ESNext",
 		"moduleResolution": "Bundler",
 		"noEmit": true,
@@ -22,6 +23,7 @@
 		"drizzle.config.ts",
 		"drizzle/**/*.d.ts",
 		"src/**/*.ts",
+		"src/**/*.tsx",
 		"worker-configuration.d.ts"
 	]
 }

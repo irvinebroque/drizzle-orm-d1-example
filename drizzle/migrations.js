@@ -1,9 +1,10 @@
-import journal from "./meta/_journal.json";
-import m0000 from "./0000_create_posts.sql";
+import journal from './meta/_journal.json';
+import m0000 from './0000_aromatic_valeria_richards.sql';
 
-export default {
-	journal,
-	migrations: {
-		m0000,
-	},
-};
+  export default {
+    journal,
+    migrations: {
+      m0000
+    }
+  }
+  

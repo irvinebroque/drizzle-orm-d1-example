@@ -1,9 +1,17 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "drizzle-orm-d1-object-example",
+	"name": "drizzle-orm-d1-benchmark",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-06-13",
 	"compatibility_flags": ["nodejs_compat"],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "drizzle-orm-d1-benchmark",
+			"database_id": "e8cfc65f-9732-4261-9d1b-f158d257f1f3",
+			"migrations_dir": "drizzle"
+		}
+	],
 	"durable_objects": {
 		"bindings": [
 			{

@@ -3,6 +3,8 @@
 .wrangler/
 worker-configuration.d.ts
 dist/
+.client-dist/
+src/generated/
 node_modules/
 .vscode/
 wrangler.toml
