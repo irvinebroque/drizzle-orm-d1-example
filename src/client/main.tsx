@@ -206,7 +206,7 @@ const COMPARISON_GROUPS: ComparisonGroup[] = [
 		baseline: "d1-drizzle-sequential",
 		description: "Make 6 read queries with Drizzle in serial",
 		modes: ["d1-drizzle-sequential", "do-drizzle-sequential"],
-		title: "Sequential awaits",
+		title: "Sequential reads",
 	},
 	{
 		baseline: "d1-drizzle-parallel",
@@ -252,7 +252,7 @@ const tags = await selectTagsForPost(db, postId);`,
 				title: "DO sequential",
 			},
 		],
-		title: "Sequential awaits",
+		title: "Sequential reads",
 	},
 	{
 		description: (
