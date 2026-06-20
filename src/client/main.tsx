@@ -210,7 +210,7 @@ const COMPARISON_GROUPS: ComparisonGroup[] = [
 	},
 	{
 		baseline: "d1-drizzle-parallel",
-		description: "All six reads are issued together. Multipliers here compare against D1 parallel.",
+		description: "All six reads are issued together.",
 		modes: ["d1-drizzle-parallel", "d1-raw-batch", "do-drizzle-pipelined"],
 		title: "Batch / pipeline",
 	},
