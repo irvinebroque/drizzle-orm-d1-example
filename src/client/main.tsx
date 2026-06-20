@@ -766,8 +766,6 @@ function App() {
 							</div>
 						</div>
 
-						<ProgrammingTradeoffs />
-
 						<div className="metric-grid">
 							<MetricTile
 								icon={<Clock />}
@@ -876,42 +874,6 @@ function MetricTile({
 				<strong>{value}</strong>
 				{detail && <small>{detail}</small>}
 			</div>
-		</div>
-	);
-}
-
-function ProgrammingTradeoffs() {
-	return (
-		<div className="tradeoff-strip" aria-label="Programming model trade-offs">
-			<article className="tradeoff-card highlight">
-				<span>Fast and ORM-shaped</span>
-				<strong>DO pipelined</strong>
-				<p>
-					Keeps the Drizzle selectors and <code>Promise.all</code> shape. The adapter pipelines
-					the calls to Durable Object SQLite.
-				</p>
-			</article>
-			<article className="tradeoff-card">
-				<span>Fast control, raw API</span>
-				<strong>D1 batch</strong>
-				<p>
-					Can land near pipelined latency, but it uses raw{" "}
-					<a
-						className="inline-doc-link"
-						href="https://developers.cloudflare.com/d1/worker-api/d1-database/#batch"
-						rel="noreferrer"
-						target="_blank"
-					>
-						env.DB.batch()
-					</a>
-					, not Drizzle.
-				</p>
-			</article>
-			<article className="tradeoff-card">
-				<span>Fastest shape, more coupling</span>
-				<strong>DO method</strong>
-				<p>One RPC is clean on the route, but the page-data logic moves into the Durable Object.</p>
-			</article>
 		</div>
 	);
 }
