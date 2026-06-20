@@ -204,7 +204,7 @@ type CodeGroup = {
 const COMPARISON_GROUPS: ComparisonGroup[] = [
 	{
 		baseline: "d1-drizzle-sequential",
-		description: "Same six Drizzle reads, awaited one by one.",
+		description: "Make 6 read queries with Drizzle in serial",
 		modes: ["d1-drizzle-sequential", "do-drizzle-sequential"],
 		title: "Sequential awaits",
 	},
