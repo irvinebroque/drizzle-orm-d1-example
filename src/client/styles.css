@@ -271,9 +271,53 @@ h3 {
 	display: flex;
 	flex: 1;
 	flex-direction: column;
-	gap: 11px;
-	justify-content: center;
+	gap: 14px;
+	justify-content: flex-start;
 	min-height: 330px;
+}
+
+.bar-group {
+	background: #ffffff;
+	border: 1px solid rgba(148, 163, 184, 0.28);
+	border-radius: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 13px;
+}
+
+.bar-group-heading {
+	align-items: flex-start;
+	display: flex;
+	gap: 12px;
+	justify-content: space-between;
+}
+
+.bar-group-heading h3 {
+	color: #0f172a;
+	font-size: 0.86rem;
+	font-weight: 780;
+	line-height: 1.2;
+}
+
+.bar-group-heading p {
+	color: #64748b;
+	font-size: 0.76rem;
+	line-height: 1.35;
+	margin-top: 3px;
+	max-width: 520px;
+}
+
+.bar-group-heading > span {
+	background: #f1f5f9;
+	border-radius: 999px;
+	color: #475569;
+	flex: 0 0 auto;
+	font-size: 0.7rem;
+	font-weight: 760;
+	line-height: 1;
+	padding: 6px 8px;
+	white-space: nowrap;
 }
 
 .bar-row {

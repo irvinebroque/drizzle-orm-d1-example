@@ -77,9 +77,9 @@ const D1_SCHEMA_STATEMENTS = [
 
 const BENCHMARK_MODES = [
 	"d1-drizzle-sequential",
+	"do-drizzle-sequential",
 	"d1-drizzle-parallel",
 	"d1-raw-batch",
-	"do-drizzle-sequential",
 	"do-drizzle-pipelined",
 	"do-app-method",
 ] as const;

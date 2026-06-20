@@ -7,9 +7,9 @@ const DEFAULT_WARMUP = 3;
 
 const MODES = [
 	"d1-drizzle-sequential",
+	"do-drizzle-sequential",
 	"d1-drizzle-parallel",
 	"d1-raw-batch",
-	"do-drizzle-sequential",
 	"do-drizzle-pipelined",
 	"do-app-method",
 ];

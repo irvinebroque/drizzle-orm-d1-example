@@ -16,11 +16,19 @@ The benchmark route simulates server-side rendering a post page. Each request pe
 
 ## Benchmark Modes
 
+Sequential awaits:
+
 - `d1-drizzle-sequential`: current D1 binding with `drizzle-orm/d1`, six awaited Drizzle queries.
+- `do-drizzle-sequential`: new `drizzle-orm/d1-object` remote Drizzle client, six awaited calls to the Durable Object.
+
+Batch / pipeline:
+
 - `d1-drizzle-parallel`: current D1 binding with the same Drizzle queries started together.
 - `d1-raw-batch`: current D1 binding with raw [`env.DB.batch()`](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch) as the old-model control case. This mode does not use Drizzle.
-- `do-drizzle-sequential`: new `drizzle-orm/d1-object` remote Drizzle client, six awaited calls to the Durable Object.
 - `do-drizzle-pipelined`: new adapter with all six Drizzle calls issued before awaiting.
+
+Durable Object method:
+
 - `do-app-method`: one Durable Object RPC method runs the six Drizzle queries next to SQLite.
 
 The deployed benchmark is available at:

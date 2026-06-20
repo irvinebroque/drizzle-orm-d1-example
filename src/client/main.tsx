@@ -27,9 +27,9 @@ import "./styles.css";
 
 const MODES = [
 	"d1-drizzle-sequential",
+	"do-drizzle-sequential",
 	"d1-drizzle-parallel",
 	"d1-raw-batch",
-	"do-drizzle-sequential",
 	"do-drizzle-pipelined",
 	"do-app-method",
 ] as const;
@@ -181,6 +181,33 @@ const MODE_DEFINITIONS: Record<BenchmarkMode, ModeDefinition> = {
 	},
 };
 
+type ComparisonGroup = {
+	baseline?: BenchmarkMode;
+	description: string;
+	modes: BenchmarkMode[];
+	title: string;
+};
+
+const COMPARISON_GROUPS: ComparisonGroup[] = [
+	{
+		baseline: "d1-drizzle-sequential",
+		description: "Same six Drizzle reads, awaited one by one.",
+		modes: ["d1-drizzle-sequential", "do-drizzle-sequential"],
+		title: "Sequential awaits",
+	},
+	{
+		baseline: "d1-drizzle-parallel",
+		description: "All six reads are issued together. Multipliers here compare against D1 parallel.",
+		modes: ["d1-drizzle-parallel", "d1-raw-batch", "do-drizzle-pipelined"],
+		title: "Batch / pipeline",
+	},
+	{
+		description: "One RPC enters the Durable Object and the page data fan-out runs beside SQLite.",
+		modes: ["do-app-method"],
+		title: "Durable Object method",
+	},
+];
+
 const DEFAULT_QUERIES = [
 	"post",
 	"author",
@@ -198,14 +225,19 @@ function initialRuns(): Record<BenchmarkMode, ModeRun> {
 	return runs;
 }
 
+function orderModes(modes: readonly BenchmarkMode[]): BenchmarkMode[] {
+	const selected = new Set(modes);
+	return MODES.filter((mode) => selected.has(mode));
+}
+
 function App() {
 	const [benchmarkInfo, setBenchmarkInfo] = useState<BenchmarkInfo>({
 		defaultPostId: 42,
-		modes: [...MODES],
+		modes: orderModes(MODES),
 		queryCountPerRender: 6,
 		scenario: { queries: DEFAULT_QUERIES },
 	});
-	const [selectedModes, setSelectedModes] = useState<BenchmarkMode[]>([...MODES]);
+	const [selectedModes, setSelectedModes] = useState<BenchmarkMode[]>(() => orderModes(MODES));
 	const [postId, setPostId] = useState("42");
 	const [iterations, setIterations] = useState("8");
 	const [warmup, setWarmup] = useState("2");
@@ -228,9 +260,10 @@ function App() {
 				if (!active) {
 					return;
 				}
-				setBenchmarkInfo(info);
+				const orderedModes = orderModes(info.modes);
+				setBenchmarkInfo({ ...info, modes: orderedModes });
 				setPostId(String(info.defaultPostId ?? 42));
-				setSelectedModes(info.modes);
+				setSelectedModes(orderedModes);
 			})
 			.catch((error: unknown) => {
 				setBanner({
@@ -245,10 +278,15 @@ function App() {
 	}, []);
 
 	const stats = useMemo(() => summarizeRuns(runs), [runs]);
-	const selectedStats = selectedModes
+	const availableModes = useMemo(() => orderModes(benchmarkInfo.modes), [benchmarkInfo.modes]);
+	const selectedOrderedModes = useMemo(() => orderModes(selectedModes), [selectedModes]);
+	const selectedStats = selectedOrderedModes
 		.map((mode) => stats[mode])
 		.filter((stat): stat is ModeStats => stat !== null);
 	const baseline = stats["d1-drizzle-sequential"];
+	const doSequential = stats["do-drizzle-sequential"];
+	const d1Parallel = stats["d1-drizzle-parallel"];
+	const d1Batch = stats["d1-raw-batch"];
 	const pipelined = stats["do-drizzle-pipelined"];
 	const appMethod = stats["do-app-method"];
 	const best = selectedStats.reduce<ModeStats | null>((current, stat) => {
@@ -257,13 +295,12 @@ function App() {
 		}
 		return current;
 	}, null);
-	const completedCount = selectedStats.reduce((total, stat) => total + stat.count, 0);
 
 	async function runBenchmark() {
 		const parsedPostId = boundedInteger(postId, 1, 10_000, benchmarkInfo.defaultPostId);
 		const parsedIterations = boundedInteger(iterations, 1, 50, 8);
 		const parsedWarmup = boundedInteger(warmup, 0, 20, 2);
-		const modes = selectedModes.filter((mode) => benchmarkInfo.modes.includes(mode));
+		const modes = selectedOrderedModes.filter((mode) => benchmarkInfo.modes.includes(mode));
 
 		if (modes.length === 0) {
 			setBanner({
@@ -383,10 +420,10 @@ function App() {
 
 	function toggleMode(mode: BenchmarkMode, checked: boolean) {
 		setSelectedModes((previous) => {
-			if (checked) {
-				return previous.includes(mode) ? previous : [...previous, mode];
-			}
-			return previous.filter((item) => item !== mode);
+			const next = checked
+				? previous.includes(mode) ? previous : [...previous, mode]
+				: previous.filter((item) => item !== mode);
+			return orderModes(next);
 		});
 	}
 
@@ -506,7 +543,7 @@ function App() {
 
 						<div className="mode-selector" aria-label="Benchmark modes">
 							<div className="mode-selector-title">Modes</div>
-							{benchmarkInfo.modes.map((mode) => {
+							{availableModes.map((mode) => {
 								const definition = MODE_DEFINITIONS[mode];
 								return (
 									<label className="mode-option" key={mode}>
@@ -541,32 +578,32 @@ function App() {
 						<div className="metric-grid">
 							<MetricTile
 								icon={<Clock />}
-								label="D1 sequential p50"
-								value={baseline ? formatMs(baseline.p50) : "Run needed"}
+								label="Sequential: DO vs D1"
+								value={formatSpeedup(baseline, doSequential)}
+								detail={formatSavings(baseline, doSequential) ?? "D1 sequential baseline"}
 							/>
 							<MetricTile
 								icon={<Lightning />}
-								label="Best p50"
-								value={best ? formatMs(best.p50) : "No samples"}
-								detail={best ? MODE_DEFINITIONS[best.mode].shortLabel : undefined}
+								label="Pipeline: DO vs D1 parallel"
+								value={formatSpeedup(d1Parallel, pipelined)}
+								detail={formatSavings(d1Parallel, pipelined) ?? "D1 parallel baseline"}
 							/>
 							<MetricTile
 								icon={<ChartBar />}
-								label="Pipelined vs sequential"
-								value={formatSpeedup(baseline, pipelined)}
-								detail={formatSavings(baseline, pipelined)}
+								label="D1 batch control"
+								value={d1Batch ? formatMs(d1Batch.p50) : "Run needed"}
+								detail="Current D1, no Drizzle"
 							/>
 							<MetricTile
 								icon={<CheckCircle />}
-								label="Measured samples"
-								value={String(completedCount)}
-								detail={`${selectedModes.length} selected modes`}
+								label="DO app method"
+								value={appMethod ? formatMs(appMethod.p50) : "Run needed"}
+								detail="Single Durable Object RPC"
 							/>
 						</div>
 
 						<PerformanceBars
-							baseline={baseline}
-							modes={selectedModes}
+							modes={selectedOrderedModes}
 							runs={runs}
 							stats={stats}
 						/>
@@ -594,8 +631,7 @@ function App() {
 
 					{activeTab === "results" && (
 						<ResultsTable
-							baseline={baseline}
-							modes={selectedModes}
+							modes={selectedOrderedModes}
 							runs={runs}
 							stats={stats}
 						/>
@@ -650,18 +686,23 @@ function MetricTile({
 }
 
 function PerformanceBars({
-	baseline,
 	modes,
 	runs,
 	stats,
 }: {
-	baseline: ModeStats | null;
 	modes: BenchmarkMode[];
 	runs: Record<BenchmarkMode, ModeRun>;
 	stats: Record<BenchmarkMode, ModeStats | null>;
 }) {
-	const max = Math.max(1, ...modes.map((mode) => stats[mode]?.p50 ?? 0));
-	const hasSamples = modes.some((mode) => (stats[mode]?.count ?? 0) > 0);
+	const selected = new Set(modes);
+	const groups = COMPARISON_GROUPS
+		.map((group) => ({
+			...group,
+			modes: group.modes.filter((mode) => selected.has(mode)),
+		}))
+		.filter((group) => group.modes.length > 0);
+	const max = Math.max(1, ...groups.flatMap((group) => group.modes.map((mode) => stats[mode]?.p50 ?? 0)));
+	const hasSamples = groups.some((group) => group.modes.some((mode) => (stats[mode]?.count ?? 0) > 0));
 
 	if (!hasSamples) {
 		return (
@@ -675,49 +716,56 @@ function PerformanceBars({
 
 	return (
 		<div className="bar-chart" role="img" aria-label="Benchmark p50 latency comparison">
-			{modes.map((mode) => {
-				const stat = stats[mode];
-				const definition = MODE_DEFINITIONS[mode];
-				const width = stat ? Math.max(2, (stat.p50 / max) * 100) : 2;
-				const speedup = baseline && stat ? baseline.p50 / stat.p50 : null;
-				const speedupLabel = mode === "d1-drizzle-sequential"
-					? "1.00x"
-					: speedup && Number.isFinite(speedup)
-						? `${speedup.toFixed(2)}x`
-						: "-";
-				return (
-					<div className="bar-row" key={mode}>
-						<div className="bar-label">
-							<strong>{definition.shortLabel}</strong>
-							<span>{runs[mode].state}</span>
+			{groups.map((group) => (
+				<div className="bar-group" key={group.title}>
+					<div className="bar-group-heading">
+						<div>
+							<h3>{group.title}</h3>
+							<p>{group.description}</p>
 						</div>
-						<div className="bar-track">
-							<div
-								className="bar-fill"
-								style={{
-									"--bar-color": definition.accent,
-									"--bar-width": `${width}%`,
-								} as React.CSSProperties}
-							/>
-						</div>
-						<div className="bar-value">
-							<strong>{stat ? formatMs(stat.p50) : "..."}</strong>
-							<span>{speedupLabel}</span>
-						</div>
+						<span>
+							{group.baseline
+								? `${MODE_DEFINITIONS[group.baseline].shortLabel} baseline`
+								: "standalone control"}
+						</span>
 					</div>
-				);
-			})}
+					{group.modes.map((mode) => {
+						const stat = stats[mode];
+						const definition = MODE_DEFINITIONS[mode];
+						const width = stat ? Math.max(2, (stat.p50 / max) * 100) : 2;
+						return (
+							<div className="bar-row" key={mode}>
+								<div className="bar-label">
+									<strong>{definition.shortLabel}</strong>
+									<span>{runs[mode].state}</span>
+								</div>
+								<div className="bar-track">
+									<div
+										className="bar-fill"
+										style={{
+											"--bar-color": definition.accent,
+											"--bar-width": `${width}%`,
+										} as React.CSSProperties}
+									/>
+								</div>
+								<div className="bar-value">
+									<strong>{stat ? formatMs(stat.p50) : "..."}</strong>
+									<span>{comparisonLabel(mode, stats)}</span>
+								</div>
+							</div>
+						);
+					})}
+				</div>
+			))}
 		</div>
 	);
 }
 
 function ResultsTable({
-	baseline,
 	modes,
 	runs,
 	stats,
 }: {
-	baseline: ModeStats | null;
 	modes: BenchmarkMode[];
 	runs: Record<BenchmarkMode, ModeRun>;
 	stats: Record<BenchmarkMode, ModeStats | null>;
@@ -732,7 +780,7 @@ function ResultsTable({
 						<Table.Head>p50 Worker</Table.Head>
 						<Table.Head>p95 Worker</Table.Head>
 						<Table.Head>HTTP p50</Table.Head>
-						<Table.Head>Speedup</Table.Head>
+						<Table.Head>Vs comparison</Table.Head>
 						<Table.Head>Samples</Table.Head>
 					</Table.Row>
 				</Table.Header>
@@ -754,7 +802,7 @@ function ResultsTable({
 								<Table.Cell>{stat ? formatMs(stat.p50) : statusLabel(runs[mode].state)}</Table.Cell>
 								<Table.Cell>{stat ? formatMs(stat.p95) : "-"}</Table.Cell>
 								<Table.Cell>{stat ? formatMs(stat.httpP50) : "-"}</Table.Cell>
-								<Table.Cell>{formatSpeedup(baseline, stat)}</Table.Cell>
+								<Table.Cell>{comparisonLabel(mode, stats)}</Table.Cell>
 								<Table.Cell>{stat?.count ?? 0}</Table.Cell>
 							</Table.Row>
 						);
@@ -1057,6 +1105,30 @@ function formatSpeedup(baseline: ModeStats | null, compared: ModeStats | null): 
 		return "-";
 	}
 	return `${speedup.toFixed(2)}x`;
+}
+
+function comparisonBaselineForMode(mode: BenchmarkMode): BenchmarkMode | undefined {
+	for (const group of COMPARISON_GROUPS) {
+		if (group.modes.includes(mode)) {
+			return group.baseline;
+		}
+	}
+	return undefined;
+}
+
+function comparisonLabel(mode: BenchmarkMode, stats: Record<BenchmarkMode, ModeStats | null>): string {
+	const baselineMode = comparisonBaselineForMode(mode);
+	if (!baselineMode) {
+		return "standalone";
+	}
+	if (baselineMode === mode) {
+		return "baseline";
+	}
+	const speedup = formatSpeedup(stats[baselineMode], stats[mode]);
+	if (speedup === "-") {
+		return `vs ${MODE_DEFINITIONS[baselineMode].shortLabel}`;
+	}
+	return `${speedup} vs ${MODE_DEFINITIONS[baselineMode].shortLabel}`;
 }
 
 function mean(values: number[]): number {
