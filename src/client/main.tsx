@@ -201,8 +201,8 @@ type CodeGroup = {
 const COMPARISON_GROUPS: ComparisonGroup[] = [
 	{
 		baseline: "d1-drizzle-sequential",
-		description: "Make 10 read queries with Drizzle in serial",
-		modes: ["d1-drizzle-sequential", "do-drizzle-sequential"],
+		description: "Make 10 read queries in serial; the method variant runs that fan-out inside the Durable Object.",
+		modes: ["d1-drizzle-sequential", "do-drizzle-sequential", "do-app-method"],
 		title: "Sequential reads",
 	},
 	{
@@ -211,16 +211,11 @@ const COMPARISON_GROUPS: ComparisonGroup[] = [
 		modes: ["d1-drizzle-parallel", "d1-raw-batch", "do-drizzle-pipelined"],
 		title: "Batch / pipeline",
 	},
-	{
-		description: "One RPC enters the Durable Object and the page data fan-out runs beside SQLite.",
-		modes: ["do-app-method"],
-		title: "Durable Object method",
-	},
 ];
 
 const CODE_GROUPS: CodeGroup[] = [
 	{
-		description: "The sequential comparison keeps the Drizzle code shape the same and changes only where the queries run.",
+		description: "The sequential comparison keeps the page-data fan-out serial and changes where those reads run.",
 		examples: [
 			{
 				code: `const db = drizzle(env.DB, { schema });
@@ -255,6 +250,25 @@ const authorTopTags = await selectTopTagsForPostAuthor(db, postId);`,
 				mode: "do-drizzle-sequential",
 				note: "Same Drizzle selectors, now sent through the Durable Object SQLite adapter.",
 				title: "DO sequential",
+			},
+			{
+				code: `const db = d1ObjectDrizzle<BlogDatabase, typeof schema>(stub, {
+	schema,
+	bookmark,
+});
+
+const data = await db.d1.client.renderPostPage(postId);
+
+export class BlogDatabase extends DrizzleD1Object<Env> {
+	db = d1ObjectDrizzle(this.ctx, { schema });
+
+	async renderPostPage(postId: number) {
+		return readPostPageWithDrizzle(this.db, postId, "sequential");
+	}
+}`,
+				mode: "do-app-method",
+				note: "Still sequential Drizzle reads, but the fan-out is moved into the Durable Object and called with one RPC.",
+				title: "DO method",
 			},
 		],
 		title: "Sequential reads",
@@ -360,35 +374,6 @@ const [
 			},
 		],
 		title: "Batch / pipeline",
-	},
-	{
-		description: "The app-method path collapses the route to one RPC, but the page-data logic now lives on the Durable Object class.",
-		examples: [
-			{
-				code: `const db = d1ObjectDrizzle<BlogDatabase, typeof schema>(stub, {
-	schema,
-	bookmark,
-});
-
-const data = await db.d1.client.renderPostPage(postId);`,
-				mode: "do-app-method",
-				note: "The Worker route is tiny because it delegates the whole page-data operation.",
-				title: "Worker route",
-			},
-			{
-				code: `export class BlogDatabase extends DrizzleD1Object<Env> {
-	db = d1ObjectDrizzle(this.ctx, { schema });
-
-	async renderPostPage(postId: number) {
-		return readPostPageWithDrizzle(this.db, postId, "sequential");
-	}
-}`,
-				mode: "do-app-method",
-				note: "That locality is the trade-off: business logic moves inside the Durable Object.",
-				title: "Durable Object method",
-			},
-		],
-		title: "Durable Object method",
 	},
 ];
 
@@ -804,9 +789,9 @@ function App() {
 							/>
 							<MetricTile
 								icon={<CheckCircle />}
-								label="DO app method"
-								value={appMethod ? formatMs(appMethod.p50) : "Run needed"}
-								detail="Single Durable Object RPC"
+								label="Method: DO vs D1"
+								value={formatSpeedup(baseline, appMethod)}
+								detail={formatSavings(baseline, appMethod) ?? "D1 sequential baseline"}
 							/>
 						</div>
 
@@ -1255,20 +1240,20 @@ function ExecutionModel({
 				stat={sequential}
 			/>
 			<ModelLane
+				description="One RPC enters the Durable Object, then the 10 sequential reads run beside SQLite."
+				icon={<BracketsCurly />}
+				label="DO app method"
+				mode="collapsed"
+				queries={queries}
+				stat={appMethod}
+			/>
+			<ModelLane
 				description="Ten Drizzle calls are issued together through the Durable Object session."
 				icon={<GitBranch />}
 				label="DO pipelined"
 				mode="parallel"
 				queries={queries}
 				stat={pipelined}
-			/>
-			<ModelLane
-				description="One RPC enters the Durable Object and the page data fan-out runs beside SQLite."
-				icon={<BracketsCurly />}
-				label="DO app method"
-				mode="collapsed"
-				queries={queries}
-				stat={appMethod}
 			/>
 		</div>
 	);

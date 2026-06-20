@@ -24,16 +24,13 @@ Sequential reads:
 
 - `d1-drizzle-sequential`: current D1 binding with `drizzle-orm/d1`, 10 awaited Drizzle queries.
 - `do-drizzle-sequential`: new `drizzle-orm/d1-object` remote Drizzle client, 10 awaited calls to the Durable Object.
+- `do-app-method`: one Durable Object RPC method runs the same 10 sequential Drizzle queries next to SQLite.
 
 Batch / pipeline:
 
 - `d1-drizzle-parallel`: current D1 binding with the same Drizzle queries started together.
 - `d1-raw-batch`: current D1 binding with raw [`env.DB.batch()`](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch) as the old-model control case. This mode does not use Drizzle.
 - `do-drizzle-pipelined`: new adapter with all 10 Drizzle calls issued before awaiting.
-
-Durable Object method:
-
-- `do-app-method`: one Durable Object RPC method runs the 10 Drizzle queries next to SQLite.
 
 ## Programming Model Trade-offs
 
